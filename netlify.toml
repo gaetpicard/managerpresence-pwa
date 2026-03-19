@@ -1,0 +1,23 @@
+# Netlify configuration
+# Ce fichier indique à Netlify comment construire et déployer l'app
+
+[build]
+  # Commande de build
+  command = "npm run build"
+  # Dossier de sortie
+  publish = "dist"
+
+# Redirection pour SPA (Single Page App)
+# Toutes les routes redirigent vers index.html
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# Headers de sécurité
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
