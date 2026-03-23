@@ -11,8 +11,10 @@ import StatistiquesPage from './pages/StatistiquesPage'
 import SettingsPage from './pages/SettingsPage'
 
 // Services
-import { LicenceService } from './services/LicenceService'
 import { FirebaseService } from './services/FirebaseService'
+
+// URL du serveur de licences
+const SERVER_URL = 'https://managerpresence-server.onrender.com'
 
 // Context pour l'état global
 export const AppContext = createContext(null)
@@ -27,57 +29,111 @@ function App() {
   const [projectId, setProjectId] = useState('')
   const [licence, setLicence] = useState(null)
   const [clubName, setClubName] = useState('')
+  const [generatedBy, setGeneratedBy] = useState('')
   const [error, setError] = useState('')
 
   // Vérifier si une session existe au démarrage
   useEffect(() => {
-    const savedProjectId = localStorage.getItem('mp_projectId')
-    if (savedProjectId) {
-      connecter(savedProjectId)
-    } else {
-      setIsLoading(false)
+    // On ne restaure PAS la session automatiquement
+    // Chaque connexion nécessite un nouveau code
+    const savedSession = sessionStorage.getItem('mp_session')
+    if (savedSession) {
+      try {
+        const session = JSON.parse(savedSession)
+        // Vérifier que la session n'a pas expiré (max 8h)
+        if (session.expiresAt && Date.now() < session.expiresAt) {
+          restaurerSession(session)
+          return
+        }
+      } catch (e) {
+        console.error('Erreur restauration session:', e)
+      }
     }
+    setIsLoading(false)
   }, [])
 
-  // Fonction de connexion
-  const connecter = async (pid) => {
+  // Restaurer une session existante
+  const restaurerSession = async (session) => {
+    try {
+      // Réinitialiser Firebase avec la config sauvegardée
+      if (session.firebaseConfig) {
+        await FirebaseService.initialize(session.firebaseConfig)
+      }
+      
+      setProjectId(session.projectId || '')
+      setClubName(session.clubName || '')
+      setLicence(session.licence || null)
+      setGeneratedBy(session.generatedBy || '')
+      setIsConnected(true)
+    } catch (err) {
+      console.error('Erreur restauration:', err)
+      sessionStorage.removeItem('mp_session')
+    }
+    setIsLoading(false)
+  }
+
+  // Fonction de connexion avec code temporaire
+  const connecterAvecCode = async (code) => {
     setIsLoading(true)
     setError('')
     
     try {
-      // 1. Vérifier la licence
-      const licenceData = await LicenceService.verifierLicence(pid)
+      // 1. Vérifier le code auprès du serveur
+      const response = await fetch(`${SERVER_URL}/pwa/verify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: code.toUpperCase() })
+      })
       
-      if (!licenceData.actif) {
-        setError('Licence expirée. Contactez le support.')
+      const data = await response.json()
+      
+      if (!response.ok) {
+        // Gérer les erreurs spécifiques
+        if (response.status === 404) {
+          setError('Code invalide. Vérifiez le code et réessayez.')
+        } else if (response.status === 410) {
+          setError('Code expiré. Demandez un nouveau code à votre administrateur.')
+        } else if (response.status === 400) {
+          setError('Ce code a déjà été utilisé.')
+        } else {
+          setError(data.error || 'Erreur de connexion')
+        }
         setIsLoading(false)
         return false
       }
       
-      if (licenceData.plan !== 'premium' && licenceData.plan !== 'trial') {
-        setError('L\'accès PC nécessite une licence Premium.')
+      // 2. Initialiser Firebase avec la config reçue
+      if (data.firebaseConfig) {
+        await FirebaseService.initialize(data.firebaseConfig)
+      } else {
+        setError('Configuration Firebase manquante')
         setIsLoading(false)
         return false
       }
       
-      // 2. Initialiser Firebase avec la config du client
-      const firebaseConfig = await LicenceService.getFirebaseConfig(pid)
-      if (firebaseConfig) {
-        await FirebaseService.initialize(firebaseConfig)
+      // 3. Sauvegarder la session (expire après 8h)
+      const session = {
+        projectId: data.projectId,
+        clubName: data.clubName,
+        firebaseConfig: data.firebaseConfig,
+        licence: data.licence,
+        generatedBy: data.generatedBy,
+        expiresAt: Date.now() + (8 * 60 * 60 * 1000) // 8 heures
       }
+      sessionStorage.setItem('mp_session', JSON.stringify(session))
       
-      // 3. Sauvegarder et mettre à jour l'état
-      localStorage.setItem('mp_projectId', pid)
-      setProjectId(pid)
-      setLicence(licenceData)
-      setClubName(licenceData.nomStructure || pid)
+      // 4. Mettre à jour l'état
+      setProjectId(data.projectId)
+      setClubName(data.clubName || data.projectId)
+      setLicence(data.licence)
+      setGeneratedBy(data.generatedBy)
       setIsConnected(true)
       setIsLoading(false)
       return true
       
     } catch (err) {
       console.error('Erreur connexion:', err)
-      setError(err.message || 'Erreur de connexion')
+      setError('Impossible de contacter le serveur. Vérifiez votre connexion.')
       setIsLoading(false)
       return false
     }
@@ -85,12 +141,13 @@ function App() {
 
   // Fonction de déconnexion
   const deconnecter = () => {
-    localStorage.removeItem('mp_projectId')
+    sessionStorage.removeItem('mp_session')
     FirebaseService.disconnect()
     setIsConnected(false)
     setProjectId('')
     setLicence(null)
     setClubName('')
+    setGeneratedBy('')
   }
 
   // Valeur du contexte
@@ -100,8 +157,9 @@ function App() {
     projectId,
     licence,
     clubName,
+    generatedBy,
     error,
-    connecter,
+    connecterAvecCode,
     deconnecter,
     setError
   }

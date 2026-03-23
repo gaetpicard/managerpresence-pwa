@@ -2,21 +2,36 @@ import React, { useState } from 'react'
 import { useApp } from '../App'
 
 function LoginPage() {
-  const { connecter, error, setError } = useApp()
-  const [projectId, setProjectId] = useState('')
+  const { connecterAvecCode, error, setError } = useApp()
+  const [code, setCode] = useState('')
   const [isLoading, setIsLoading] = useState(false)
+
+  // Formater le code en majuscules avec tiret automatique
+  const handleCodeChange = (e) => {
+    let value = e.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, '')
+    
+    // Ajouter automatiquement le tiret après 4 caractères
+    if (value.length === 4 && !value.includes('-')) {
+      value = value + '-'
+    }
+    
+    // Limiter à 9 caractères (XXXX-XXXX)
+    if (value.length <= 9) {
+      setCode(value)
+    }
+  }
 
   const handleSubmit = async (e) => {
     e.preventDefault()
     setError('')
     
-    if (!projectId.trim()) {
-      setError('Veuillez entrer votre identifiant de structure')
+    if (!code.trim() || code.length < 9) {
+      setError('Veuillez entrer un code d\'accès valide (format: XXXX-XXXX)')
       return
     }
     
     setIsLoading(true)
-    await connecter(projectId.trim().toLowerCase())
+    await connecterAvecCode(code.trim())
     setIsLoading(false)
   }
 
@@ -26,7 +41,7 @@ function LoginPage() {
         <div className="login-header">
           <div className="login-logo">MP</div>
           <h1>ManagerPresence</h1>
-          <p>Connectez-vous pour accéder à votre espace de gestion</p>
+          <p>Accès sécurisé depuis un ordinateur</p>
         </div>
 
         {error && (
@@ -37,36 +52,51 @@ function LoginPage() {
 
         <form onSubmit={handleSubmit}>
           <div className="form-group">
-            <label className="form-label">Identifiant de structure (Project ID)</label>
+            <label className="form-label">Code d'accès temporaire</label>
             <input
               type="text"
-              className="form-input"
-              placeholder="ex: mon-club-abc123"
-              value={projectId}
-              onChange={(e) => setProjectId(e.target.value)}
+              className="form-input code-input"
+              placeholder="XXXX-XXXX"
+              value={code}
+              onChange={handleCodeChange}
               disabled={isLoading}
               autoFocus
+              autoComplete="off"
+              spellCheck="false"
+              style={{
+                textAlign: 'center',
+                fontSize: '24px',
+                fontFamily: 'monospace',
+                letterSpacing: '4px',
+                textTransform: 'uppercase'
+              }}
             />
-            <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '8px' }}>
-              Vous trouverez cet identifiant dans l'application mobile → À propos → Firebase
-            </p>
           </div>
 
           <button 
             type="submit" 
             className="btn btn-primary btn-block btn-lg"
-            disabled={isLoading}
+            disabled={isLoading || code.length < 9}
           >
             {isLoading ? (
               <>
                 <span className="loading-spinner" style={{ width: '20px', height: '20px', borderWidth: '2px' }}></span>
-                Connexion...
+                Vérification...
               </>
             ) : (
-              'Se connecter'
+              '🔐 Accéder'
             )}
           </button>
         </form>
+
+        <div className="login-help">
+          <h3>💡 Comment obtenir un code ?</h3>
+          <ol>
+            <li>Demandez à un <strong>administrateur</strong> de votre structure</li>
+            <li>Il génère le code depuis l'app mobile → <strong>Accès PWA</strong></li>
+            <li>Le code est valable <strong>10 minutes</strong></li>
+          </ol>
+        </div>
 
         <div style={{ marginTop: '24px', textAlign: 'center' }}>
           <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>

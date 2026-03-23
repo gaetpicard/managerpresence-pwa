@@ -527,6 +527,40 @@ body {
   font-size: 14px;
 }
 
+.login-help {
+  margin-top: var(--spacing-xl);
+  padding: var(--spacing-lg);
+  background: rgba(66, 153, 225, 0.1);
+  border: 1px solid rgba(66, 153, 225, 0.3);
+  border-radius: var(--radius-md);
+}
+
+.login-help h3 {
+  font-size: 14px;
+  margin-bottom: var(--spacing-md);
+  color: var(--info);
+}
+
+.login-help ol {
+  margin: 0;
+  padding-left: var(--spacing-lg);
+}
+
+.login-help li {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: var(--spacing-sm);
+}
+
+.login-help li strong {
+  color: var(--text-primary);
+}
+
+.code-input {
+  background: rgba(107, 70, 193, 0.1) !important;
+  border: 2px solid var(--primary) !important;
+}
+
 /* ========================================
    RESPONSIVE
    ======================================== */
