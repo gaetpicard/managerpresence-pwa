@@ -3,15 +3,17 @@ import { NavLink } from 'react-router-dom'
 import { useApp } from '../App'
 
 function Layout({ children, title }) {
-  const { clubName, licence, deconnecter } = useApp()
+  const { clubName, licence, deconnecter, generatedBy } = useApp()
 
   const navItems = [
     { path: '/', icon: '🏠', label: 'Tableau de bord' },
     { path: '/presences', icon: '✅', label: 'Présences' },
     { path: '/membres', icon: '👥', label: 'Membres' },
     { path: '/creneaux', icon: '📅', label: 'Créneaux' },
+    { path: '/cadres', icon: '👔', label: 'Cadres' },
     { path: '/statistiques', icon: '📊', label: 'Statistiques' },
-    { path: '/settings', icon: '⚙️', label: 'Paramètres' },
+    { path: '/forum', icon: '💬', label: 'Forum' },
+    { path: '/audit', icon: '📋', label: 'Audit' },
   ]
 
   const getPlanBadgeClass = () => {
@@ -20,6 +22,15 @@ function Layout({ children, title }) {
       case 'premium': return 'badge-premium'
       case 'standard': return 'badge-standard'
       default: return 'badge-trial'
+    }
+  }
+
+  const getPlanEmoji = () => {
+    if (!licence) return '⏳'
+    switch (licence.plan) {
+      case 'premium': return '🌟'
+      case 'standard': return '📘'
+      default: return '⏳'
     }
   }
 
@@ -32,8 +43,8 @@ function Layout({ children, title }) {
             <div className="sidebar-logo-text">
               <h1>{clubName || 'ManagerPresence'}</h1>
               <p>
-                <span className={`badge ${getPlanBadgeClass()}`} style={{ fontSize: '10px', padding: '2px 8px' }}>
-                  {licence?.planNom || licence?.plan?.toUpperCase() || 'TRIAL'}
+                <span className={`badge ${getPlanBadgeClass()}`}>
+                  {getPlanEmoji()} {licence?.planNom || licence?.plan?.toUpperCase() || 'TRIAL'}
                 </span>
               </p>
             </div>
@@ -56,7 +67,7 @@ function Layout({ children, title }) {
 
         <div className="sidebar-footer">
           {licence && (
-            <div style={{ marginBottom: '12px', fontSize: '12px', color: 'var(--text-muted)' }}>
+            <div className="licence-info">
               {licence.joursRestants > 0 ? (
                 <span>✅ {licence.joursRestants} jours restants</span>
               ) : (
@@ -64,7 +75,12 @@ function Layout({ children, title }) {
               )}
             </div>
           )}
-          <button className="btn btn-secondary btn-block btn-sm" onClick={deconnecter}>
+          {generatedBy && (
+            <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '12px', textAlign: 'center' }}>
+              Connecté par {generatedBy}
+            </div>
+          )}
+          <button className="btn btn-danger btn-block btn-sm" onClick={deconnecter}>
             🚪 Déconnexion
           </button>
         </div>
@@ -72,8 +88,8 @@ function Layout({ children, title }) {
 
       <main className="main-content">
         {title && (
-          <div style={{ marginBottom: '24px' }}>
-            <h1 style={{ fontSize: '28px', fontWeight: '700' }}>{title}</h1>
+          <div className="page-header">
+            <h1 className="page-title">{title}</h1>
           </div>
         )}
         {children}

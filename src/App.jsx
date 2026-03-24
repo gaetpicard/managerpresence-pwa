@@ -7,8 +7,10 @@ import DashboardPage from './pages/DashboardPage'
 import PresencesPage from './pages/PresencesPage'
 import MembresPage from './pages/MembresPage'
 import CreneauxPage from './pages/CreneauxPage'
+import CadresPage from './pages/CadresPage'
 import StatistiquesPage from './pages/StatistiquesPage'
-import SettingsPage from './pages/SettingsPage'
+import ForumPage from './pages/ForumPage'
+import AuditPage from './pages/AuditPage'
 
 // Services
 import { FirebaseService } from './services/FirebaseService'
@@ -187,11 +189,17 @@ function App() {
           <Route path="/creneaux" element={
             isConnected ? <CreneauxPage /> : <Navigate to="/login" />
           } />
+          <Route path="/cadres" element={
+            isConnected ? <CadresPage /> : <Navigate to="/login" />
+          } />
           <Route path="/statistiques" element={
             isConnected ? <StatistiquesPage /> : <Navigate to="/login" />
           } />
-          <Route path="/settings" element={
-            isConnected ? <SettingsPage /> : <Navigate to="/login" />
+          <Route path="/forum" element={
+            isConnected ? <ForumPage /> : <Navigate to="/login" />
+          } />
+          <Route path="/audit" element={
+            isConnected ? <AuditPage /> : <Navigate to="/login" />
           } />
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>

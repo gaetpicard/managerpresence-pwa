@@ -5,31 +5,42 @@ import { FirebaseService } from '../services/FirebaseService'
 function StatistiquesPage() {
   const [stats, setStats] = useState(null)
   const [isLoading, setIsLoading] = useState(true)
+  const [eleves, setEleves] = useState([])
+  const [presences, setPresences] = useState([])
+  const [toast, setToast] = useState(null)
 
   useEffect(() => {
     loadStats()
   }, [])
 
+  const showToast = (message, type = 'info') => {
+    setToast({ message, type })
+    setTimeout(() => setToast(null), 3000)
+  }
+
   const loadStats = async () => {
     setIsLoading(true)
     try {
       if (FirebaseService.isInitialized()) {
-        const [eleves, presences, creneaux] = await Promise.all([
+        const [elevesData, presencesData, creneaux] = await Promise.all([
           FirebaseService.getEleves(),
           FirebaseService.getAllPresences(),
           FirebaseService.getCreneaux()
         ])
 
+        setEleves(elevesData)
+        setPresences(presencesData)
+
         // Calculer les stats
-        const totalPresences = presences.filter(p => p.present).length
-        const totalAbsences = presences.filter(p => !p.present).length
-        const tauxPresence = presences.length > 0 
-          ? Math.round((totalPresences / presences.length) * 100) 
+        const totalPresences = presencesData.filter(p => p.present).length
+        const totalAbsences = presencesData.filter(p => !p.present).length
+        const tauxPresence = presencesData.length > 0 
+          ? Math.round((totalPresences / presencesData.length) * 100) 
           : 0
 
         // Stats par mois
         const parMois = {}
-        presences.forEach(p => {
+        presencesData.forEach(p => {
           if (p.date) {
             const mois = p.date.substring(0, 7) // YYYY-MM
             if (!parMois[mois]) {
@@ -45,7 +56,7 @@ function StatistiquesPage() {
 
         // Top présences
         const presencesParEleve = {}
-        presences.filter(p => p.present).forEach(p => {
+        presencesData.filter(p => p.present).forEach(p => {
           presencesParEleve[p.eleveId] = (presencesParEleve[p.eleveId] || 0) + 1
         })
 
@@ -53,27 +64,99 @@ function StatistiquesPage() {
           .sort((a, b) => b[1] - a[1])
           .slice(0, 5)
           .map(([eleveId, count]) => {
-            const eleve = eleves.find(e => e.id === eleveId)
+            const eleve = elevesData.find(e => e.id === eleveId)
             return {
               nom: eleve ? `${eleve.prenom || ''} ${eleve.nom || ''}`.trim() : 'Inconnu',
               count
             }
           })
 
+        // Stats par élève (pour export)
+        const statsParEleve = elevesData.map(eleve => {
+          const presencesEleve = presencesData.filter(p => p.eleveId === eleve.id)
+          const nbPresent = presencesEleve.filter(p => p.present).length
+          const nbAbsent = presencesEleve.filter(p => !p.present).length
+          const taux = presencesEleve.length > 0 
+            ? Math.round((nbPresent / presencesEleve.length) * 100) 
+            : 0
+          return {
+            ...eleve,
+            nbPresent,
+            nbAbsent,
+            tauxPresence: taux
+          }
+        }).sort((a, b) => b.tauxPresence - a.tauxPresence)
+
         setStats({
-          totalMembres: eleves.length,
+          totalMembres: elevesData.length,
           totalCreneaux: creneaux.length,
           totalPresences,
           totalAbsences,
           tauxPresence,
           parMois: Object.entries(parMois).sort((a, b) => a[0].localeCompare(b[0])),
-          topEleves
+          topEleves,
+          statsParEleve
         })
       }
     } catch (error) {
       console.error('Erreur chargement stats:', error)
     }
     setIsLoading(false)
+  }
+
+  const exportPresencesCSV = () => {
+    if (!stats?.statsParEleve) return
+
+    const headers = ['Nom', 'Prénom', 'Groupe', 'Présences', 'Absences', 'Taux (%)']
+    const rows = stats.statsParEleve.map(e => [
+      e.nom || '',
+      e.prenom || '',
+      e.groupe || '',
+      e.nbPresent,
+      e.nbAbsent,
+      e.tauxPresence
+    ])
+    
+    const csv = [headers, ...rows]
+      .map(row => row.map(cell => `"${cell}"`).join(','))
+      .join('\n')
+    
+    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `statistiques_${new Date().toISOString().split('T')[0]}.csv`
+    link.click()
+    URL.revokeObjectURL(url)
+    
+    showToast('Export CSV téléchargé', 'success')
+  }
+
+  const exportDetailCSV = () => {
+    const headers = ['Date', 'Élève', 'Groupe', 'Statut']
+    const rows = presences.map(p => {
+      const eleve = eleves.find(e => e.id === p.eleveId)
+      return [
+        p.date || '',
+        eleve ? `${eleve.prenom || ''} ${eleve.nom || ''}`.trim() : 'Inconnu',
+        eleve?.groupe || '',
+        p.present ? 'Présent' : 'Absent'
+      ]
+    })
+    
+    const csv = [headers, ...rows]
+      .map(row => row.map(cell => `"${cell}"`).join(','))
+      .join('\n')
+    
+    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `presences_detail_${new Date().toISOString().split('T')[0]}.csv`
+    link.click()
+    URL.revokeObjectURL(url)
+    
+    showToast('Export détaillé téléchargé', 'success')
   }
 
   if (isLoading) {
@@ -100,6 +183,26 @@ function StatistiquesPage() {
 
   return (
     <Layout title="Statistiques">
+      {/* Toolbar */}
+      <div className="toolbar">
+        <div style={{ flex: 1 }}>
+          <span style={{ color: 'var(--text-muted)' }}>
+            Données basées sur {presences.length} enregistrements
+          </span>
+        </div>
+        <div className="toolbar-actions">
+          <button className="btn btn-secondary btn-sm" onClick={loadStats}>
+            🔄 Actualiser
+          </button>
+          <button className="btn btn-secondary btn-sm" onClick={exportPresencesCSV}>
+            📤 Export résumé
+          </button>
+          <button className="btn btn-primary btn-sm" onClick={exportDetailCSV}>
+            📤 Export détaillé
+          </button>
+        </div>
+      </div>
+
       {/* Stats principales */}
       <div className="stats-grid">
         <div className="stat-card">
@@ -222,6 +325,15 @@ function StatistiquesPage() {
           )}
         </div>
       </div>
+
+      {/* Toast */}
+      {toast && (
+        <div className="toast-container">
+          <div className={`toast toast-${toast.type}`}>
+            {toast.message}
+          </div>
+        </div>
+      )}
     </Layout>
   )
 }
