@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import Layout from '../components/Layout'
 import { FirebaseService } from '../services/FirebaseService'
 
 function MembresPage() {
+  const navigate = useNavigate()
   const [eleves, setEleves] = useState([])
   const [creneaux, setCreneaux] = useState([])
   const [isLoading, setIsLoading] = useState(true)
@@ -285,7 +287,11 @@ function MembresPage() {
               </thead>
               <tbody>
                 {filteredAndSortedEleves.map(eleve => (
-                  <tr key={eleve.id}>
+                  <tr 
+                    key={eleve.id}
+                    onClick={() => navigate(`/membre/${eleve.id}`)}
+                    style={{ cursor: 'pointer' }}
+                  >
                     <td style={{ fontWeight: 600 }}>{eleve.nom || '-'}</td>
                     <td>{eleve.prenom || '-'}</td>
                     <td>
@@ -312,14 +318,14 @@ function MembresPage() {
                       <div className="table-actions">
                         <button 
                           className="btn btn-secondary btn-icon"
-                          onClick={() => openEditModal(eleve)}
+                          onClick={(e) => { e.stopPropagation(); openEditModal(eleve); }}
                           title="Modifier"
                         >
                           ✏️
                         </button>
                         <button 
                           className="btn btn-danger btn-icon"
-                          onClick={() => handleDelete(eleve)}
+                          onClick={(e) => { e.stopPropagation(); handleDelete(eleve); }}
                           title="Supprimer"
                         >
                           🗑️

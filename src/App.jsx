@@ -6,9 +6,11 @@ import LoginPage from './pages/LoginPage'
 import DashboardPage from './pages/DashboardPage'
 import PresencesPage from './pages/PresencesPage'
 import MembresPage from './pages/MembresPage'
+import FicheMembrePage from './pages/FicheMembrePage'
 import CreneauxPage from './pages/CreneauxPage'
 import CadresPage from './pages/CadresPage'
 import StatistiquesPage from './pages/StatistiquesPage'
+import ExportPage from './pages/ExportPage'
 import ForumPage from './pages/ForumPage'
 import AuditPage from './pages/AuditPage'
 
@@ -186,6 +188,9 @@ function App() {
           <Route path="/membres" element={
             isConnected ? <MembresPage /> : <Navigate to="/login" />
           } />
+          <Route path="/membre/:id" element={
+            isConnected ? <FicheMembrePage /> : <Navigate to="/login" />
+          } />
           <Route path="/creneaux" element={
             isConnected ? <CreneauxPage /> : <Navigate to="/login" />
           } />
@@ -194,6 +199,9 @@ function App() {
           } />
           <Route path="/statistiques" element={
             isConnected ? <StatistiquesPage /> : <Navigate to="/login" />
+          } />
+          <Route path="/exports" element={
+            isConnected ? <ExportPage /> : <Navigate to="/login" />
           } />
           <Route path="/forum" element={
             isConnected ? <ForumPage /> : <Navigate to="/login" />

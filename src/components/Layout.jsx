@@ -12,6 +12,7 @@ function Layout({ children, title }) {
     { path: '/creneaux', icon: '📅', label: 'Créneaux' },
     { path: '/cadres', icon: '👔', label: 'Cadres' },
     { path: '/statistiques', icon: '📊', label: 'Statistiques' },
+    { path: '/exports', icon: '📤', label: 'Exports' },
     { path: '/forum', icon: '💬', label: 'Forum' },
     { path: '/audit', icon: '📋', label: 'Audit' },
   ]
