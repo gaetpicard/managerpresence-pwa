@@ -10,7 +10,7 @@ import FicheMembrePage from './pages/FicheMembrePage'
 import CreneauxPage from './pages/CreneauxPage'
 import DatesPage from './pages/DatesPage'
 import CadresPage from './pages/CadresPage'
-import StatistiquesPage from './pages/StatistiquesPage'
+import ParametresPage from './pages/ParametresPage'
 import ExportPage from './pages/ExportPage'
 import ForumPage from './pages/ForumPage'
 import AuditPage from './pages/AuditPage'
@@ -228,8 +228,8 @@ function App() {
           <Route path="/cadres" element={
             isConnected ? <CadresPage /> : <Navigate to="/login" />
           } />
-          <Route path="/statistiques" element={
-            isConnected ? <StatistiquesPage /> : <Navigate to="/login" />
+          <Route path="/parametres" element={
+            isConnected ? <ParametresPage /> : <Navigate to="/login" />
           } />
           <Route path="/exports" element={
             isConnected ? <ExportPage /> : <Navigate to="/login" />

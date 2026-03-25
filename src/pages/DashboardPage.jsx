@@ -4,11 +4,11 @@ import { useApp } from '../App'
 import { FirebaseService } from '../services/FirebaseService'
 
 function DashboardPage() {
-  const { licence, clubName } = useApp()
+  const { licence, clubName, termes } = useApp()
   const [stats, setStats] = useState({
     totalMembres: 0,
     totalCreneaux: 0,
-    presencesAujourdhui: 0,
+    seancesPointees: 0,
     tauxPresence: 0
   })
   const [isLoading, setIsLoading] = useState(true)
@@ -21,23 +21,42 @@ function DashboardPage() {
     setIsLoading(true)
     try {
       if (FirebaseService.isInitialized()) {
-        const [eleves, creneaux, presences] = await Promise.all([
+        const [eleves, creneaux, seances] = await Promise.all([
           FirebaseService.getEleves(),
           FirebaseService.getCreneaux(),
-          FirebaseService.getAllPresences()
+          FirebaseService.getSeances()
         ])
 
-        const today = new Date().toISOString().split('T')[0]
-        const presencesToday = presences.filter(p => p.date === today && p.present)
-        
-        const totalPresences = presences.filter(p => p.present).length
-        const totalRecords = presences.length
-        const tauxPresence = totalRecords > 0 ? Math.round((totalPresences / totalRecords) * 100) : 0
+        // Calculer le taux moyen basé sur les séances POINTÉES uniquement
+        const seancesPointees = seances.filter(s => {
+          const hasPresences = s.presences && Object.keys(s.presences).length > 0
+          const isValidated = s.creneauxValides && s.creneauxValides.length > 0
+          return hasPresences || isValidated
+        })
+
+        // Compter les présences/total sur les séances pointées
+        let totalPresent = 0
+        let totalPointages = 0
+
+        seancesPointees.forEach(seance => {
+          if (seance.presences) {
+            Object.values(seance.presences).forEach(status => {
+              totalPointages++
+              if (status === 'PRESENT' || status === true) {
+                totalPresent++
+              }
+            })
+          }
+        })
+
+        const tauxPresence = totalPointages > 0 
+          ? Math.round((totalPresent / totalPointages) * 100) 
+          : 0
 
         setStats({
           totalMembres: eleves.length,
-          totalCreneaux: creneaux.length,
-          presencesAujourdhui: presencesToday.length,
+          totalCreneaux: creneaux.filter(c => c.actif !== false).length,
+          seancesPointees: seancesPointees.length,
           tauxPresence
         })
       }
@@ -54,6 +73,13 @@ function DashboardPage() {
       month: 'long',
       year: 'numeric'
     })
+  }
+
+  // Couleur du taux de présence
+  const getTauxColor = (taux) => {
+    if (taux >= 80) return 'var(--success)'
+    if (taux >= 60) return 'var(--warning)'
+    return 'var(--danger)'
   }
 
   return (
@@ -73,25 +99,27 @@ function DashboardPage() {
         <div className="stat-card">
           <div className="stat-icon">👥</div>
           <div className="stat-value">{isLoading ? '...' : stats.totalMembres}</div>
-          <div className="stat-label">Membres inscrits</div>
+          <div className="stat-label">{termes?.eleves || 'Membres'} inscrits</div>
         </div>
         
         <div className="stat-card">
           <div className="stat-icon">📅</div>
           <div className="stat-value">{isLoading ? '...' : stats.totalCreneaux}</div>
-          <div className="stat-label">Créneaux actifs</div>
+          <div className="stat-label">{termes?.creneaux || 'Créneaux'} actifs</div>
         </div>
         
         <div className="stat-card">
-          <div className="stat-icon">✅</div>
-          <div className="stat-value">{isLoading ? '...' : stats.presencesAujourdhui}</div>
-          <div className="stat-label">Présences aujourd'hui</div>
+          <div className="stat-icon">🗓️</div>
+          <div className="stat-value">{isLoading ? '...' : stats.seancesPointees}</div>
+          <div className="stat-label">{termes?.seances || 'Séances'} pointées</div>
         </div>
         
         <div className="stat-card">
           <div className="stat-icon">📊</div>
-          <div className="stat-value">{isLoading ? '...' : `${stats.tauxPresence}%`}</div>
-          <div className="stat-label">Taux de présence</div>
+          <div className="stat-value" style={{ color: isLoading ? 'inherit' : getTauxColor(stats.tauxPresence) }}>
+            {isLoading ? '...' : `${stats.tauxPresence}%`}
+          </div>
+          <div className="stat-label">Taux de présence moyen</div>
         </div>
       </div>
 
@@ -139,13 +167,13 @@ function DashboardPage() {
         
         <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
           <a href="/presences" className="btn btn-primary">
-            ✅ Saisir les présences
+            ✅ Voir les présences
           </a>
           <a href="/membres" className="btn btn-secondary">
-            👥 Gérer les membres
+            👥 Gérer les {termes?.eleves?.toLowerCase() || 'membres'}
           </a>
-          <a href="/statistiques" className="btn btn-secondary">
-            📊 Voir les statistiques
+          <a href="/exports" className="btn btn-secondary">
+            📤 Exporter les données
           </a>
         </div>
       </div>

@@ -13,10 +13,10 @@ function Layout({ children, title }) {
     { path: '/creneaux', icon: '📅', label: termes?.creneaux || 'Créneaux' },
     { path: '/dates', icon: '🗓️', label: termes?.seances || 'Dates' },
     { path: '/cadres', icon: '👔', label: termes?.cadres || 'Cadres' },
-    { path: '/statistiques', icon: '📊', label: 'Statistiques' },
     { path: '/exports', icon: '📤', label: 'Exports' },
     { path: '/forum', icon: '💬', label: 'Forum' },
     { path: '/audit', icon: '📋', label: 'Audit' },
+    { path: '/parametres', icon: '⚙️', label: 'Paramètres' },
   ]
 
   const getPlanBadgeClass = () => {

@@ -451,5 +451,189 @@ export const FirebaseService = {
     }
     
     return seancesCreees
+  },
+
+  // ========================================
+  // SUPER USER & CONFIGURATION
+  // ========================================
+
+  /**
+   * Récupère la configuration Super User
+   */
+  async getSuperUserConfig() {
+    if (!db) return null
+    try {
+      const docRef = doc(db, 'config', 'super_user')
+      const docSnap = await getDoc(docRef)
+      return docSnap.exists() ? docSnap.data() : null
+    } catch (error) {
+      console.error('Erreur getSuperUserConfig:', error)
+      return null
+    }
+  },
+
+  /**
+   * Met à jour la configuration Super User
+   */
+  async updateSuperUserConfig(data) {
+    if (!db) throw new Error('Firebase non initialisé')
+    const docRef = doc(db, 'config', 'super_user')
+    await setDoc(docRef, data, { merge: true })
+  },
+
+  /**
+   * Met à jour les termes
+   */
+  async updateTermes(termes) {
+    if (!db) throw new Error('Firebase non initialisé')
+    const docRef = doc(db, 'config', 'termes')
+    await setDoc(docRef, termes)
+  },
+
+  /**
+   * Récupère la configuration email
+   */
+  async getEmailConfig() {
+    if (!db) return null
+    try {
+      const docRef = doc(db, 'config', 'email')
+      const docSnap = await getDoc(docRef)
+      return docSnap.exists() ? docSnap.data() : null
+    } catch (error) {
+      console.error('Erreur getEmailConfig:', error)
+      return null
+    }
+  },
+
+  /**
+   * Met à jour la configuration email
+   */
+  async updateEmailConfig(config) {
+    if (!db) throw new Error('Firebase non initialisé')
+    const docRef = doc(db, 'config', 'email')
+    await setDoc(docRef, config)
+  },
+
+  /**
+   * Récupère le logo
+   */
+  async getLogo() {
+    if (!db) return null
+    try {
+      const docRef = doc(db, 'config', 'logo')
+      const docSnap = await getDoc(docRef)
+      if (docSnap.exists() && docSnap.data().data) {
+        return `data:image/png;base64,${docSnap.data().data}`
+      }
+      return null
+    } catch (error) {
+      console.error('Erreur getLogo:', error)
+      return null
+    }
+  },
+
+  /**
+   * Met à jour le logo
+   */
+  async updateLogo(base64Data) {
+    if (!db) throw new Error('Firebase non initialisé')
+    const docRef = doc(db, 'config', 'logo')
+    await setDoc(docRef, { data: base64Data })
+  },
+
+  /**
+   * Supprime le logo
+   */
+  async deleteLogo() {
+    if (!db) throw new Error('Firebase non initialisé')
+    const docRef = doc(db, 'config', 'logo')
+    await deleteDoc(docRef)
+  },
+
+  /**
+   * Récupère la config backend
+   */
+  async getBackendConfig() {
+    if (!db) return null
+    try {
+      const docRef = doc(db, 'config', 'backend')
+      const docSnap = await getDoc(docRef)
+      return docSnap.exists() ? docSnap.data() : null
+    } catch (error) {
+      console.error('Erreur getBackendConfig:', error)
+      return null
+    }
+  },
+
+  /**
+   * Met à jour la config backend
+   */
+  async updateBackendConfig(config) {
+    if (!db) throw new Error('Firebase non initialisé')
+    const docRef = doc(db, 'config', 'backend')
+    await setDoc(docRef, config, { merge: true })
+  },
+
+  /**
+   * Récupère l'email de notification
+   */
+  async getNotificationEmail() {
+    if (!db) return ''
+    try {
+      const docRef = doc(db, 'config', 'super_user')
+      const docSnap = await getDoc(docRef)
+      return docSnap.exists() ? (docSnap.data().notificationEmail || '') : ''
+    } catch (error) {
+      console.error('Erreur getNotificationEmail:', error)
+      return ''
+    }
+  },
+
+  /**
+   * Met à jour l'email de notification
+   */
+  async updateNotificationEmail(email) {
+    if (!db) throw new Error('Firebase non initialisé')
+    const docRef = doc(db, 'config', 'super_user')
+    await setDoc(docRef, { notificationEmail: email }, { merge: true })
+  },
+
+  /**
+   * Récupère la config SMS
+   */
+  async getSmsConfig() {
+    if (!db) return { enabled: false }
+    try {
+      const docRef = doc(db, 'config', 'sms_settings')
+      const docSnap = await getDoc(docRef)
+      return docSnap.exists() ? docSnap.data() : { enabled: false }
+    } catch (error) {
+      console.error('Erreur getSmsConfig:', error)
+      return { enabled: false }
+    }
+  },
+
+  /**
+   * Récupère les périodes scolaires
+   */
+  async getPeriodes() {
+    if (!db) return []
+    try {
+      const docRef = doc(db, 'config', 'periodes')
+      const docSnap = await getDoc(docRef)
+      return docSnap.exists() ? (docSnap.data().list || []) : []
+    } catch (error) {
+      console.error('Erreur getPeriodes:', error)
+      return []
+    }
+  },
+
+  /**
+   * Met à jour le nom du club
+   */
+  async updateClubName(nom) {
+    if (!db) throw new Error('Firebase non initialisé')
+    const docRef = doc(db, 'config', 'club')
+    await setDoc(docRef, { nom }, { merge: true })
   }
 }
