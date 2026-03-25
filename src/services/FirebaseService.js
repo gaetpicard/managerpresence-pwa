@@ -635,5 +635,193 @@ export const FirebaseService = {
     if (!db) throw new Error('Firebase non initialisé')
     const docRef = doc(db, 'config', 'club')
     await setDoc(docRef, { nom }, { merge: true })
+  },
+
+  /**
+   * Met à jour les périodes scolaires
+   */
+  async updatePeriodes(periodes) {
+    if (!db) throw new Error('Firebase non initialisé')
+    const docRef = doc(db, 'config', 'periodes')
+    await setDoc(docRef, { list: periodes })
+  },
+
+  /**
+   * Récupère le message d'absence personnalisé
+   */
+  async getMessageAbsence() {
+    if (!db) return null
+    try {
+      const docRef = doc(db, 'config', 'messages')
+      const docSnap = await getDoc(docRef)
+      return docSnap.exists() ? (docSnap.data().absenceTemplate || null) : null
+    } catch (error) {
+      console.error('Erreur getMessageAbsence:', error)
+      return null
+    }
+  },
+
+  /**
+   * Met à jour le message d'absence
+   */
+  async updateMessageAbsence(template) {
+    if (!db) throw new Error('Firebase non initialisé')
+    const docRef = doc(db, 'config', 'messages')
+    await setDoc(docRef, { absenceTemplate: template }, { merge: true })
+  },
+
+  /**
+   * Récupère la config de rappel d'appel
+   */
+  async getRappelConfig() {
+    if (!db) return true
+    try {
+      const docRef = doc(db, 'config', 'rappel')
+      const docSnap = await getDoc(docRef)
+      return docSnap.exists() ? (docSnap.data().enabled !== false) : true
+    } catch (error) {
+      console.error('Erreur getRappelConfig:', error)
+      return true
+    }
+  },
+
+  /**
+   * Met à jour la config de rappel
+   */
+  async updateRappelConfig(enabled) {
+    if (!db) throw new Error('Firebase non initialisé')
+    const docRef = doc(db, 'config', 'rappel')
+    await setDoc(docRef, { enabled })
+  },
+
+  /**
+   * Récupère la liste des sauvegardes
+   */
+  async getBackups() {
+    if (!db) return []
+    try {
+      const docRef = doc(db, 'config', 'backups')
+      const docSnap = await getDoc(docRef)
+      return docSnap.exists() ? (docSnap.data().list || []) : []
+    } catch (error) {
+      console.error('Erreur getBackups:', error)
+      return []
+    }
+  },
+
+  /**
+   * Crée une sauvegarde complète
+   */
+  async createBackup() {
+    if (!db) throw new Error('Firebase non initialisé')
+    
+    const now = new Date()
+    const backupName = `backup_${now.toISOString().replace(/[:.]/g, '-')}`
+    
+    try {
+      // Récupérer toutes les données
+      const [eleves, cadres, creneaux, seances, forum] = await Promise.all([
+        this.getEleves(),
+        this.getCadres(),
+        this.getCreneaux(),
+        this.getSeances(),
+        this.getForumMessages()
+      ])
+      
+      // Créer le document de backup
+      const backupData = {
+        createdAt: now.toISOString(),
+        eleves: eleves.reduce((acc, e) => { acc[e.id] = e; return acc }, {}),
+        cadres: cadres.reduce((acc, c) => { acc[c.id] = c; return acc }, {}),
+        creneaux: creneaux.reduce((acc, c) => { acc[c.id] = c; return acc }, {}),
+        seances: seances.reduce((acc, s) => { acc[s.id] = s; return acc }, {}),
+        forum: forum.reduce((acc, f) => { acc[f.id] = f; return acc }, {})
+      }
+      
+      const backupRef = doc(db, 'backups', backupName)
+      await setDoc(backupRef, backupData)
+      
+      // Mettre à jour la liste des backups
+      const listRef = doc(db, 'config', 'backups')
+      const listSnap = await getDoc(listRef)
+      const existingList = listSnap.exists() ? (listSnap.data().list || []) : []
+      await setDoc(listRef, { list: [backupName, ...existingList].slice(0, 20) })
+      
+      return backupName
+    } catch (error) {
+      console.error('Erreur createBackup:', error)
+      throw error
+    }
+  },
+
+  /**
+   * Lance un diagnostic des données
+   */
+  async runDiagnostic() {
+    if (!db) throw new Error('Firebase non initialisé')
+    
+    try {
+      const [eleves, creneaux, seances] = await Promise.all([
+        this.getEleves(),
+        this.getCreneaux(),
+        this.getSeances()
+      ])
+      
+      const validCreneauIds = new Set(creneaux.map(c => c.id))
+      const validEleveIds = new Set(eleves.map(e => e.id))
+      
+      let report = []
+      report.push('📊 Diagnostic des données')
+      report.push('========================')
+      report.push(`Créneaux existants : ${creneaux.length}`)
+      report.push(`Élèves : ${eleves.length}`)
+      report.push(`Séances : ${seances.length}`)
+      report.push('')
+      
+      let issueCount = 0
+      
+      // Vérifier les creneauxIds des élèves
+      report.push('🔍 Vérification des élèves...')
+      eleves.forEach(eleve => {
+        const orphanIds = (eleve.creneauxIds || []).filter(id => !validCreneauIds.has(id))
+        if (orphanIds.length > 0) {
+          issueCount++
+          report.push(`  ❌ ${eleve.prenom} ${eleve.nom} : ${orphanIds.length} ID(s) orphelin(s)`)
+        }
+      })
+      
+      // Vérifier les présences
+      report.push('')
+      report.push('🔍 Vérification des présences...')
+      let orphanPresences = 0
+      seances.forEach(seance => {
+        Object.keys(seance.presences || {}).forEach(key => {
+          const parts = key.split('_')
+          if (parts.length === 2) {
+            if (!validEleveIds.has(parts[0])) orphanPresences++
+            if (!validCreneauIds.has(parts[1])) orphanPresences++
+          }
+        })
+      })
+      
+      if (orphanPresences > 0) {
+        report.push(`  ⚠️ ${orphanPresences} clé(s) de présence avec ID invalide`)
+      } else {
+        report.push('  ✅ Toutes les clés de présence sont valides')
+      }
+      
+      report.push('')
+      if (issueCount === 0 && orphanPresences === 0) {
+        report.push('✅ Aucun problème détecté !')
+      } else {
+        report.push(`⚠️ ${issueCount + (orphanPresences > 0 ? 1 : 0)} problème(s) détecté(s)`)
+        report.push('Pour appliquer les corrections, utilisez l\'app Android.')
+      }
+      
+      return report.join('\n')
+    } catch (error) {
+      console.error('Erreur diagnostic:', error)
+      throw error
+    }
   }
 }
