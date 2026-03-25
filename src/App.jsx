@@ -8,6 +8,7 @@ import PresencesPage from './pages/PresencesPage'
 import MembresPage from './pages/MembresPage'
 import FicheMembrePage from './pages/FicheMembrePage'
 import CreneauxPage from './pages/CreneauxPage'
+import DatesPage from './pages/DatesPage'
 import CadresPage from './pages/CadresPage'
 import StatistiquesPage from './pages/StatistiquesPage'
 import ExportPage from './pages/ExportPage'
@@ -35,6 +36,20 @@ function App() {
   const [clubName, setClubName] = useState('')
   const [generatedBy, setGeneratedBy] = useState('')
   const [error, setError] = useState('')
+  
+  // 🏷️ Termes personnalisables selon le type de structure
+  const [termes, setTermes] = useState({
+    eleve: 'Membre',
+    eleves: 'Membres',
+    cadre: 'Cadre',
+    cadres: 'Cadres',
+    creneau: 'Créneau',
+    creneaux: 'Créneaux',
+    seance: 'Séance',
+    seances: 'Séances',
+    club: 'Structure',
+    typeStructure: 'club'
+  })
 
   // Vérifier si une session existe au démarrage
   useEffect(() => {
@@ -62,6 +77,12 @@ function App() {
       // Réinitialiser Firebase avec la config sauvegardée
       if (session.firebaseConfig) {
         await FirebaseService.initialize(session.firebaseConfig)
+        
+        // 🏷️ Charger les termes personnalisés
+        const termesData = await FirebaseService.getTermes()
+        if (termesData) {
+          setTermes(prev => ({ ...prev, ...termesData }))
+        }
       }
       
       setProjectId(session.projectId || '')
@@ -109,6 +130,12 @@ function App() {
       // 2. Initialiser Firebase avec la config reçue
       if (data.firebaseConfig) {
         await FirebaseService.initialize(data.firebaseConfig)
+        
+        // 🏷️ Charger les termes personnalisés
+        const termesData = await FirebaseService.getTermes()
+        if (termesData) {
+          setTermes(prev => ({ ...prev, ...termesData }))
+        }
       } else {
         setError('Configuration Firebase manquante')
         setIsLoading(false)
@@ -163,6 +190,7 @@ function App() {
     clubName,
     generatedBy,
     error,
+    termes,
     connecterAvecCode,
     deconnecter,
     setError
@@ -193,6 +221,9 @@ function App() {
           } />
           <Route path="/creneaux" element={
             isConnected ? <CreneauxPage /> : <Navigate to="/login" />
+          } />
+          <Route path="/dates" element={
+            isConnected ? <DatesPage /> : <Navigate to="/login" />
           } />
           <Route path="/cadres" element={
             isConnected ? <CadresPage /> : <Navigate to="/login" />

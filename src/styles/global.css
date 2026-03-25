@@ -1170,3 +1170,111 @@ a {
     grid-template-columns: 1fr;
   }
 }
+
+/* ========================================
+   TABLEAU DE PRÉSENCES - Style Android
+   ======================================== */
+
+.table-presence {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 13px;
+}
+
+.table-presence th,
+.table-presence td {
+  border: 1px solid var(--border);
+  padding: 6px 8px;
+}
+
+.table-presence th {
+  background: var(--bg-elevated);
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.table-presence tbody tr:hover {
+  background: var(--bg-hover);
+}
+
+/* Statuts de présence */
+.statut-present,
+.statut-absent,
+.statut-excuse,
+.statut-retard,
+.statut-vide {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.statut-present {
+  background: var(--present);
+  color: white;
+}
+
+.statut-absent {
+  background: var(--absent);
+  color: white;
+}
+
+.statut-excuse {
+  background: var(--excuse);
+  color: black;
+}
+
+.statut-retard {
+  background: var(--retard);
+  color: white;
+}
+
+.statut-vide {
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px dashed var(--text-muted);
+}
+
+/* Ligne de groupe */
+.groupe-header td {
+  padding: 4px 12px !important;
+  font-size: 12px !important;
+}
+
+/* Tabs */
+.tabs {
+  display: flex;
+  gap: 2px;
+  margin-bottom: var(--spacing-lg);
+  background: var(--bg-elevated);
+  padding: 4px;
+  border-radius: var(--radius-md);
+}
+
+.tab {
+  flex: 1;
+  padding: 10px 16px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: all 0.2s;
+}
+
+.tab:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.tab.active {
+  background: var(--primary);
+  color: white;
+}
+

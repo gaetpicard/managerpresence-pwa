@@ -3,14 +3,16 @@ import { NavLink } from 'react-router-dom'
 import { useApp } from '../App'
 
 function Layout({ children, title }) {
-  const { clubName, licence, deconnecter, generatedBy } = useApp()
+  const { clubName, licence, deconnecter, generatedBy, termes } = useApp()
 
+  // 🏷️ Navigation avec termes dynamiques
   const navItems = [
     { path: '/', icon: '🏠', label: 'Tableau de bord' },
     { path: '/presences', icon: '✅', label: 'Présences' },
-    { path: '/membres', icon: '👥', label: 'Membres' },
-    { path: '/creneaux', icon: '📅', label: 'Créneaux' },
-    { path: '/cadres', icon: '👔', label: 'Cadres' },
+    { path: '/membres', icon: '👥', label: termes?.eleves || 'Membres' },
+    { path: '/creneaux', icon: '📅', label: termes?.creneaux || 'Créneaux' },
+    { path: '/dates', icon: '🗓️', label: termes?.seances || 'Dates' },
+    { path: '/cadres', icon: '👔', label: termes?.cadres || 'Cadres' },
     { path: '/statistiques', icon: '📊', label: 'Statistiques' },
     { path: '/exports', icon: '📤', label: 'Exports' },
     { path: '/forum', icon: '💬', label: 'Forum' },

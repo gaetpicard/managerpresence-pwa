@@ -2,9 +2,11 @@ import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import Layout from '../components/Layout'
 import { FirebaseService } from '../services/FirebaseService'
+import { useApp } from '../App'
 
 function MembresPage() {
   const navigate = useNavigate()
+  const { termes } = useApp()
   const [eleves, setEleves] = useState([])
   const [creneaux, setCreneaux] = useState([])
   const [isLoading, setIsLoading] = useState(true)
@@ -197,7 +199,7 @@ function MembresPage() {
 
   if (isLoading) {
     return (
-      <Layout title="Membres">
+      <Layout title={termes.eleves}>
         <div className="empty-state">
           <div className="loading-spinner"></div>
           <p>Chargement...</p>
@@ -207,14 +209,14 @@ function MembresPage() {
   }
 
   return (
-    <Layout title="Membres">
+    <Layout title={termes.eleves}>
       {/* Toolbar */}
       <div className="toolbar">
         <div className="toolbar-search">
           <input
             type="text"
             className="form-input"
-            placeholder="Rechercher un membre..."
+            placeholder={`Rechercher un ${termes.eleve.toLowerCase()}...`}
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
           />

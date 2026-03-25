@@ -328,5 +328,128 @@ export const FirebaseService = {
     const docRef = doc(collection(db, 'audit_log'))
     await setDoc(docRef, { ...log, timestamp: new Date() })
     return docRef.id
+  },
+
+  /**
+   * Récupère les termes personnalisés de la structure
+   * Stockés dans config/termes
+   */
+  async getTermes() {
+    if (!db) return null
+    try {
+      const docRef = doc(db, 'config', 'termes')
+      const docSnap = await getDoc(docRef)
+      if (docSnap.exists()) {
+        return docSnap.data()
+      }
+      return null // Pas de config, on utilisera les défauts
+    } catch (error) {
+      console.error('Erreur getTermes:', error)
+      return null
+    }
+  },
+
+  /**
+   * Récupère la config du club
+   * Stockée dans config/club
+   */
+  async getClubConfig() {
+    if (!db) return null
+    try {
+      const docRef = doc(db, 'config', 'club')
+      const docSnap = await getDoc(docRef)
+      if (docSnap.exists()) {
+        return docSnap.data()
+      }
+      return null
+    } catch (error) {
+      console.error('Erreur getClubConfig:', error)
+      return null
+    }
+  },
+
+  // ========================================
+  // SÉANCES (DATES)
+  // ========================================
+
+  /**
+   * Récupère toutes les séances
+   */
+  async getSeances() {
+    if (!db) return []
+    try {
+      const snapshot = await getDocs(collection(db, 'seances'))
+      return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
+    } catch (error) {
+      console.error('Erreur getSeances:', error)
+      return []
+    }
+  },
+
+  /**
+   * Ajoute une séance
+   */
+  async addSeance(seance) {
+    if (!db) throw new Error('Firebase non initialisé')
+    const docRef = doc(collection(db, 'seances'))
+    await setDoc(docRef, seance)
+    return docRef.id
+  },
+
+  /**
+   * Met à jour une séance
+   */
+  async updateSeance(id, data) {
+    if (!db) throw new Error('Firebase non initialisé')
+    await updateDoc(doc(db, 'seances', id), data)
+  },
+
+  /**
+   * Supprime une séance
+   */
+  async deleteSeance(id) {
+    if (!db) throw new Error('Firebase non initialisé')
+    await deleteDoc(doc(db, 'seances', id))
+  },
+
+  /**
+   * Génère des séances automatiquement pour une période
+   * @param startDate Date de début (YYYY-MM-DD)
+   * @param endDate Date de fin (YYYY-MM-DD)
+   * @param joursSemaine Jours de la semaine (0=dimanche, 1=lundi, etc.)
+   * @param creneauxIds IDs des créneaux à activer
+   */
+  async generateSeances(startDate, endDate, joursSemaine, creneauxIds) {
+    if (!db) throw new Error('Firebase non initialisé')
+    
+    const start = new Date(startDate)
+    const end = new Date(endDate)
+    const seancesCreees = []
+    
+    // Récupérer les séances existantes pour éviter les doublons
+    const existingSeances = await this.getSeances()
+    const existingDates = new Set(existingSeances.map(s => s.date))
+    
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      if (joursSemaine.includes(d.getDay())) {
+        const dateStr = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`
+        
+        if (!existingDates.has(dateStr)) {
+          const seance = {
+            date: dateStr,
+            creneauxActifsIds: creneauxIds,
+            creneauxValides: [],
+            heureAppelEffectue: {},
+            cadreNom: null,
+            presences: {},
+            cadreValidateur: {}
+          }
+          await this.addSeance(seance)
+          seancesCreees.push(dateStr)
+        }
+      }
+    }
+    
+    return seancesCreees
   }
 }

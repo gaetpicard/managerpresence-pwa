@@ -1,35 +1,29 @@
 import React, { useState, useEffect } from 'react'
 import Layout from '../components/Layout'
 import { FirebaseService } from '../services/FirebaseService'
+import { useApp } from '../App'
 
 function PresencesPage() {
+  const { termes } = useApp()
   const [eleves, setEleves] = useState([])
   const [creneaux, setCreneaux] = useState([])
-  const [presences, setPresences] = useState({})
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0])
+  const [presences, setPresences] = useState([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [toast, setToast] = useState(null)
+  
+  // Filtres
   const [selectedCreneau, setSelectedCreneau] = useState('')
   const [filterGroupe, setFilterGroupe] = useState('')
-  const [isLoading, setIsLoading] = useState(true)
-  const [searchTerm, setSearchTerm] = useState('')
-  const [toast, setToast] = useState(null)
-
-  // Statuts possibles
-  const statuts = [
-    { value: true, label: 'Présent', icon: '✅', color: 'var(--present)' },
-    { value: false, label: 'Absent', icon: '❌', color: 'var(--absent)' },
-    { value: 'excuse', label: 'Excusé', icon: '📝', color: 'var(--excuse)' },
-    { value: 'retard', label: 'Retard', icon: '⏰', color: 'var(--retard)' }
-  ]
+  
+  // Mode pointage (désactivé par défaut sur PC)
+  const [pointageActif, setPointageActif] = useState(false)
+  
+  // Dates à afficher (7 dernières dates avec présences)
+  const [datesAffichees, setDatesAffichees] = useState([])
 
   useEffect(() => {
     loadData()
   }, [])
-
-  useEffect(() => {
-    if (selectedDate && selectedCreneau) {
-      loadPresences()
-    }
-  }, [selectedDate, selectedCreneau])
 
   const showToast = (message, type = 'info') => {
     setToast({ message, type })
@@ -40,16 +34,27 @@ function PresencesPage() {
     setIsLoading(true)
     try {
       if (FirebaseService.isInitialized()) {
-        const [elevesData, creneauxData] = await Promise.all([
+        const [elevesData, creneauxData, presencesData] = await Promise.all([
           FirebaseService.getEleves(),
-          FirebaseService.getCreneaux()
+          FirebaseService.getCreneaux(),
+          FirebaseService.getAllPresences()
         ])
+        
         setEleves(elevesData)
         setCreneaux(creneauxData.filter(c => c.actif !== false))
+        setPresences(presencesData)
         
-        if (creneauxData.length > 0) {
+        // Sélectionner le premier créneau par défaut
+        if (creneauxData.length > 0 && !selectedCreneau) {
           setSelectedCreneau(creneauxData[0].id)
         }
+        
+        // Calculer les dates à afficher (7 dernières dates avec présences)
+        const uniqueDates = [...new Set(presencesData.map(p => p.date).filter(Boolean))]
+          .sort((a, b) => b.localeCompare(a))
+          .slice(0, 7)
+          .reverse() // Plus anciennes à gauche
+        setDatesAffichees(uniqueDates)
       }
     } catch (error) {
       console.error('Erreur chargement:', error)
@@ -58,119 +63,90 @@ function PresencesPage() {
     setIsLoading(false)
   }
 
-  const loadPresences = async () => {
+  // Filtrer les élèves par groupe et créneau
+  const elevesFiltre = eleves.filter(e => {
+    const matchGroupe = filterGroupe === '' || e.groupe === filterGroupe
+    const matchCreneau = selectedCreneau === '' || e.creneauxIds?.includes(selectedCreneau)
+    return matchGroupe && matchCreneau
+  }).sort((a, b) => `${a.nom} ${a.prenom}`.localeCompare(`${b.nom} ${b.prenom}`))
+
+  // Grouper les élèves par groupe
+  const elevesParGroupe = elevesFiltre.reduce((acc, eleve) => {
+    const groupe = eleve.groupe || 'Sans groupe'
+    if (!acc[groupe]) acc[groupe] = []
+    acc[groupe].push(eleve)
+    return acc
+  }, {})
+
+  // Obtenir la présence pour un élève et une date
+  const getPresence = (eleveId, date) => {
+    return presences.find(p => 
+      p.eleveId === eleveId && 
+      p.date === date && 
+      (selectedCreneau === '' || p.creneauId === selectedCreneau)
+    )
+  }
+
+  // Rendu du statut de présence
+  const renderStatut = (presence) => {
+    if (!presence) return <span className="statut-vide">○</span>
+    
+    const statut = presence.present
+    if (statut === true) return <span className="statut-present">✓</span>
+    if (statut === false) return <span className="statut-absent">✗</span>
+    if (statut === 'excuse') return <span className="statut-excuse">E</span>
+    if (statut === 'retard') return <span className="statut-retard">R</span>
+    return <span className="statut-vide">○</span>
+  }
+
+  // Changer le statut (si pointage actif)
+  const cycleStatut = async (eleveId, date) => {
+    if (!pointageActif) {
+      showToast('Activez le mode pointage pour modifier', 'info')
+      return
+    }
+    
+    const presence = getPresence(eleveId, date)
+    const currentStatut = presence?.present
+    
+    // Cycle: vide → présent → absent → excusé → retard → vide
+    let newStatut
+    if (currentStatut === undefined || currentStatut === null) newStatut = true
+    else if (currentStatut === true) newStatut = false
+    else if (currentStatut === false) newStatut = 'excuse'
+    else if (currentStatut === 'excuse') newStatut = 'retard'
+    else newStatut = true
+    
     try {
-      const presencesData = await FirebaseService.getPresences(selectedDate)
-      const presencesMap = {}
-      presencesData.forEach(p => {
-        presencesMap[`${p.eleveId}_${p.creneauId}`] = p.present
-      })
-      setPresences(presencesMap)
+      await FirebaseService.setPresence(eleveId, date, selectedCreneau, newStatut)
+      await loadData()
     } catch (error) {
-      console.error('Erreur chargement présences:', error)
+      console.error('Erreur pointage:', error)
+      showToast('Erreur lors du pointage', 'error')
     }
   }
 
-  const cyclePresence = async (eleveId) => {
-    const key = `${eleveId}_${selectedCreneau}`
-    const currentValue = presences[key]
-    
-    // Cycle: undefined -> true -> false -> 'excuse' -> 'retard' -> undefined
-    let newValue
-    if (currentValue === undefined || currentValue === null) {
-      newValue = true
-    } else if (currentValue === true) {
-      newValue = false
-    } else if (currentValue === false) {
-      newValue = 'excuse'
-    } else if (currentValue === 'excuse') {
-      newValue = 'retard'
-    } else {
-      newValue = true // Retour au début
-    }
-
-    // Mise à jour optimiste
-    setPresences(prev => ({ ...prev, [key]: newValue }))
-
-    try {
-      await FirebaseService.setPresence(eleveId, selectedDate, selectedCreneau, newValue)
-    } catch (error) {
-      console.error('Erreur enregistrement présence:', error)
-      setPresences(prev => ({ ...prev, [key]: currentValue }))
-      showToast('Erreur lors de l\'enregistrement', 'error')
-    }
+  // Formater la date pour l'affichage (JJ/MM)
+  const formatDateShort = (dateStr) => {
+    if (!dateStr) return ''
+    const [year, month, day] = dateStr.split('-')
+    return `${day}/${month}`
   }
 
-  const setAllPresent = async () => {
-    if (!confirm('Marquer tous les membres comme présents ?')) return
-    
-    for (const eleve of filteredEleves) {
-      const key = `${eleve.id}_${selectedCreneau}`
-      setPresences(prev => ({ ...prev, [key]: true }))
-      try {
-        await FirebaseService.setPresence(eleve.id, selectedDate, selectedCreneau, true)
-      } catch (error) {
-        console.error('Erreur:', error)
-      }
-    }
-    showToast(`${filteredEleves.length} membre(s) marqués présents`, 'success')
-  }
-
-  const resetAll = async () => {
-    if (!confirm('Effacer toutes les présences de cette séance ?')) return
-    
-    for (const eleve of filteredEleves) {
-      const key = `${eleve.id}_${selectedCreneau}`
-      setPresences(prev => ({ ...prev, [key]: undefined }))
-    }
-    showToast('Présences réinitialisées', 'success')
-  }
-
-  // Liste unique des groupes
+  // Liste des groupes
   const uniqueGroupes = [...new Set(eleves.map(e => e.groupe).filter(Boolean))].sort()
 
-  const filteredEleves = eleves
-    .filter(e => {
-      // Filtrer par créneau si l'élève a des créneaux assignés
-      if (e.creneauxIds && e.creneauxIds.length > 0 && selectedCreneau) {
-        if (!e.creneauxIds.includes(selectedCreneau)) return false
-      }
-      
-      const searchLower = searchTerm.toLowerCase()
-      const matchSearch = 
-        (e.nom || '').toLowerCase().includes(searchLower) ||
-        (e.prenom || '').toLowerCase().includes(searchLower)
-      
-      const matchGroupe = filterGroupe === '' || e.groupe === filterGroupe
-      
-      return matchSearch && matchGroupe
-    })
-    .sort((a, b) => {
-      const nomA = `${a.nom || ''} ${a.prenom || ''}`.toLowerCase()
-      const nomB = `${b.nom || ''} ${b.prenom || ''}`.toLowerCase()
-      return nomA.localeCompare(nomB)
-    })
-
-  // Compteurs
-  const presentCount = filteredEleves.filter(e => presences[`${e.id}_${selectedCreneau}`] === true).length
-  const absentCount = filteredEleves.filter(e => presences[`${e.id}_${selectedCreneau}`] === false).length
-  const excuseCount = filteredEleves.filter(e => presences[`${e.id}_${selectedCreneau}`] === 'excuse').length
-  const retardCount = filteredEleves.filter(e => presences[`${e.id}_${selectedCreneau}`] === 'retard').length
-
-  const getPresenceStyle = (value) => {
-    const statut = statuts.find(s => s.value === value)
-    return statut ? { background: statut.color, color: 'white' } : { background: 'var(--bg-elevated)', color: 'var(--text-muted)' }
-  }
-
-  const getPresenceIcon = (value) => {
-    const statut = statuts.find(s => s.value === value)
-    return statut ? statut.icon : '○'
-  }
-
-  const getGroupeBadgeClass = (groupe) => {
-    const groupeNum = parseInt(groupe?.replace(/\D/g, '')) || 0
-    if (groupeNum >= 1 && groupeNum <= 5) return `badge-g${groupeNum}`
-    return 'badge-standard'
+  // Couleurs des groupes (comme l'app Android)
+  const getGroupeColor = (groupe) => {
+    const colors = {
+      'G1': '#4CAF50',
+      'G2': '#2196F3', 
+      'G3': '#FF9800',
+      'G4': '#9C27B0',
+      'G5': '#F44336',
+      'G Perf': '#E91E63'
+    }
+    return colors[groupe] || '#607D8B'
   }
 
   if (isLoading) {
@@ -186,34 +162,23 @@ function PresencesPage() {
 
   return (
     <Layout title="Présences">
-      {/* Filtres */}
-      <div className="toolbar" style={{ flexWrap: 'wrap' }}>
-        <div className="form-group" style={{ marginBottom: 0, minWidth: '140px' }}>
-          <input
-            type="date"
-            className="form-input"
-            value={selectedDate}
-            onChange={(e) => setSelectedDate(e.target.value)}
-          />
-        </div>
-        
+      {/* Barre de filtres */}
+      <div className="toolbar" style={{ flexWrap: 'wrap', gap: 'var(--spacing-md)' }}>
         <select
           className="form-input form-select"
-          style={{ width: '200px' }}
+          style={{ minWidth: '180px' }}
           value={selectedCreneau}
           onChange={(e) => setSelectedCreneau(e.target.value)}
         >
-          {creneaux.length === 0 && <option value="">Aucun créneau</option>}
+          <option value="">Tous les {termes?.creneaux?.toLowerCase() || 'créneaux'}</option>
           {creneaux.map(c => (
-            <option key={c.id} value={c.id}>
-              {c.nom || c.jour || c.id}
-            </option>
+            <option key={c.id} value={c.id}>{c.nom}</option>
           ))}
         </select>
 
         <select
           className="form-input form-select"
-          style={{ width: '150px' }}
+          style={{ minWidth: '150px' }}
           value={filterGroupe}
           onChange={(e) => setFilterGroupe(e.target.value)}
         >
@@ -222,126 +187,196 @@ function PresencesPage() {
             <option key={g} value={g}>{g}</option>
           ))}
         </select>
-        
-        <div className="toolbar-search" style={{ flex: 1, minWidth: '200px' }}>
-          <input
-            type="text"
-            className="form-input"
-            placeholder="Rechercher..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-          />
-        </div>
 
-        <div className="toolbar-actions">
-          <button className="btn btn-success btn-sm" onClick={setAllPresent}>
-            ✅ Tous présents
-          </button>
-          <button className="btn btn-secondary btn-sm" onClick={resetAll}>
-            🔄 Reset
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Légende</span>
+          <button className="btn btn-secondary btn-sm" onClick={loadData}>
+            🔄
           </button>
         </div>
       </div>
 
-      {/* Compteurs */}
-      <div style={{ 
-        display: 'flex', 
-        gap: 'var(--spacing-md)', 
-        marginBottom: 'var(--spacing-lg)',
-        flexWrap: 'wrap'
-      }}>
-        <span className="badge" style={{ background: 'var(--present)', padding: '8px 16px' }}>
-          ✅ {presentCount} présent(s)
-        </span>
-        <span className="badge" style={{ background: 'var(--absent)', padding: '8px 16px' }}>
-          ❌ {absentCount} absent(s)
-        </span>
-        <span className="badge" style={{ background: 'var(--excuse)', padding: '8px 16px' }}>
-          📝 {excuseCount} excusé(s)
-        </span>
-        <span className="badge" style={{ background: 'var(--retard)', padding: '8px 16px' }}>
-          ⏰ {retardCount} retard(s)
-        </span>
-        <span style={{ color: 'var(--text-muted)', alignSelf: 'center', marginLeft: 'auto' }}>
-          {filteredEleves.length} membre(s)
-        </span>
+      {/* Légende */}
+      <div className="card" style={{ padding: 'var(--spacing-sm) var(--spacing-md)', marginBottom: 'var(--spacing-md)' }}>
+        <div style={{ display: 'flex', gap: 'var(--spacing-lg)', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'center', fontSize: '13px' }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <span className="statut-present">✓</span> Présent
+          </span>
+          <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <span className="statut-absent">✗</span> Absent
+          </span>
+          <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <span className="statut-excuse">E</span> Excusé
+          </span>
+          <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <span className="statut-retard">R</span> Retard
+          </span>
+          <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <span className="statut-vide">○</span> Non pointé
+          </span>
+        </div>
       </div>
 
-      {/* Liste des membres */}
+      {/* Tableau de présences style Android */}
       <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-        {filteredEleves.length === 0 ? (
+        {elevesFiltre.length === 0 ? (
           <div className="empty-state">
             <div className="empty-state-icon">👥</div>
-            <div className="empty-state-title">Aucun membre</div>
+            <div className="empty-state-title">Aucun {termes?.eleve?.toLowerCase() || 'membre'}</div>
             <div className="empty-state-desc">
               {eleves.length === 0 
-                ? 'Ajoutez des membres depuis l\'onglet Membres'
-                : 'Aucun résultat pour vos critères'
+                ? `Ajoutez des ${termes?.eleves?.toLowerCase() || 'membres'} pour commencer`
+                : 'Aucun résultat pour ces filtres'
               }
             </div>
           </div>
+        ) : datesAffichees.length === 0 ? (
+          <div className="empty-state">
+            <div className="empty-state-icon">📅</div>
+            <div className="empty-state-title">Aucun pointage</div>
+            <div className="empty-state-desc">
+              Les pointages effectués depuis l'application apparaîtront ici
+            </div>
+          </div>
         ) : (
-          <div style={{ padding: 'var(--spacing-md)' }}>
-            {filteredEleves.map(eleve => {
-              const value = presences[`${eleve.id}_${selectedCreneau}`]
-              return (
-                <div key={eleve.id} className="list-item">
-                  <button
-                    onClick={() => cyclePresence(eleve.id)}
-                    className="presence-cell"
-                    style={getPresenceStyle(value)}
-                    title="Cliquer pour changer le statut"
-                  >
-                    {getPresenceIcon(value)}
-                  </button>
-                  <div className="list-item-content">
-                    <div className="list-item-title">
-                      {eleve.prenom} {eleve.nom}
-                    </div>
-                    {eleve.groupe && (
-                      <span className={`badge ${getGroupeBadgeClass(eleve.groupe)}`} style={{ fontSize: '10px' }}>
-                        {eleve.groupe}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              )
-            })}
+          <div className="table-container" style={{ overflowX: 'auto' }}>
+            <table className="table table-presence">
+              <thead>
+                <tr>
+                  <th style={{ 
+                    position: 'sticky', 
+                    left: 0, 
+                    background: 'var(--bg-card)', 
+                    zIndex: 2,
+                    minWidth: '150px',
+                    borderRight: '2px solid var(--border)'
+                  }}>
+                    {termes?.eleves || 'Membres'}
+                  </th>
+                  {datesAffichees.map(date => (
+                    <th key={date} style={{ textAlign: 'center', minWidth: '50px', padding: '8px 4px' }}>
+                      {formatDateShort(date)}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {Object.entries(elevesParGroupe).map(([groupe, elevesGroupe]) => (
+                  <React.Fragment key={groupe}>
+                    {/* Ligne de séparation groupe */}
+                    <tr className="groupe-header">
+                      <td 
+                        colSpan={datesAffichees.length + 1}
+                        style={{ 
+                          background: getGroupeColor(groupe),
+                          color: '#fff',
+                          fontWeight: 600,
+                          padding: '4px 12px',
+                          fontSize: '12px'
+                        }}
+                      >
+                        {groupe}
+                      </td>
+                    </tr>
+                    {/* Élèves du groupe */}
+                    {elevesGroupe.map(eleve => (
+                      <tr key={eleve.id}>
+                        <td style={{ 
+                          position: 'sticky', 
+                          left: 0, 
+                          background: 'var(--bg-card)',
+                          fontWeight: 500,
+                          fontSize: '13px',
+                          borderRight: '2px solid var(--border)',
+                          borderLeft: `3px solid ${getGroupeColor(eleve.groupe)}`
+                        }}>
+                          {eleve.prenom}
+                          {eleve.groupe && (
+                            <span style={{ 
+                              marginLeft: '4px',
+                              width: '8px',
+                              height: '8px',
+                              borderRadius: '50%',
+                              background: getGroupeColor(eleve.groupe),
+                              display: 'inline-block'
+                            }}></span>
+                          )}
+                        </td>
+                        {datesAffichees.map(date => {
+                          const presence = getPresence(eleve.id, date)
+                          return (
+                            <td 
+                              key={date}
+                              style={{ 
+                                textAlign: 'center',
+                                cursor: pointageActif ? 'pointer' : 'default',
+                                padding: '6px 4px',
+                                background: presence?.present === true ? 'rgba(76, 175, 80, 0.15)' :
+                                           presence?.present === false ? 'rgba(244, 67, 54, 0.15)' :
+                                           presence?.present === 'excuse' ? 'rgba(255, 152, 0, 0.15)' :
+                                           presence?.present === 'retard' ? 'rgba(33, 150, 243, 0.15)' :
+                                           'transparent'
+                              }}
+                              onClick={() => cycleStatut(eleve.id, date)}
+                            >
+                              {renderStatut(presence)}
+                            </td>
+                          )
+                        })}
+                      </tr>
+                    ))}
+                  </React.Fragment>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </div>
 
-      {/* Légende */}
+      {/* Compteur */}
+      <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginTop: 'var(--spacing-md)', textAlign: 'right' }}>
+        {elevesFiltre.length} {termes?.eleve?.toLowerCase() || 'membre'}(s)
+      </p>
+
+      {/* Bouton activation pointage */}
       <div style={{ 
-        marginTop: 'var(--spacing-lg)', 
-        padding: 'var(--spacing-md)',
-        background: 'var(--bg-card)',
-        borderRadius: 'var(--radius-md)',
-        display: 'flex',
-        gap: 'var(--spacing-lg)',
-        flexWrap: 'wrap',
-        fontSize: '13px',
-        color: 'var(--text-muted)'
+        position: 'fixed', 
+        bottom: 'var(--spacing-xl)', 
+        right: 'var(--spacing-xl)',
+        zIndex: 100
       }}>
-        <span>💡 Cliquez sur le bouton pour faire défiler les statuts :</span>
-        {statuts.map(s => (
-          <span key={s.label} style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-            <span style={{ 
-              width: '20px', 
-              height: '20px', 
-              background: s.color, 
-              borderRadius: '4px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: '12px'
-            }}>
-              {s.icon}
-            </span>
-            {s.label}
-          </span>
-        ))}
+        <button 
+          className={`btn ${pointageActif ? 'btn-danger' : 'btn-secondary'}`}
+          style={{ 
+            padding: '12px 20px',
+            borderRadius: 'var(--radius-full)',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+            fontSize: '13px'
+          }}
+          onClick={() => setPointageActif(!pointageActif)}
+        >
+          {pointageActif ? '🔒 Désactiver pointage' : '✏️ Activer pointage'}
+        </button>
       </div>
+
+      {/* Indicateur mode pointage */}
+      {pointageActif && (
+        <div style={{
+          position: 'fixed',
+          top: '80px',
+          right: 'var(--spacing-xl)',
+          background: 'var(--warning)',
+          color: '#000',
+          padding: '6px 12px',
+          borderRadius: 'var(--radius-md)',
+          fontWeight: 600,
+          fontSize: '12px',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+          zIndex: 100
+        }}>
+          ✏️ Mode pointage actif - Cliquez sur une cellule
+        </div>
+      )}
 
       {/* Toast */}
       {toast && (
