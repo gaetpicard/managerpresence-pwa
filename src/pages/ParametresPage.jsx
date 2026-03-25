@@ -200,6 +200,9 @@ function ParametresPage() {
   }
 
   const handleDisconnect = () => { window.location.href = '/login' }
+  
+  // État pour voir le mdp SU à la connexion
+  const [showSuPasswordLogin, setShowSuPasswordLogin] = useState(false)
 
   if (isLoading) return <Layout title="Paramètres"><div className="empty-state"><div className="loading-spinner"></div><p>Chargement...</p></div></Layout>
 
@@ -215,9 +218,15 @@ function ParametresPage() {
           </div>
           <div className="form-group">
             <label className="form-label">Mot de passe SU</label>
-            <input type="password" className="form-input" placeholder="Entrez le mot de passe" value={suPassword}
-              onChange={(e) => { setSuPassword(e.target.value); setSuError(null) }}
-              onKeyDown={(e) => e.key === 'Enter' && verifySuPassword()} />
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <input type={showSuPasswordLogin ? 'text' : 'password'} className="form-input" placeholder="Entrez le mot de passe" value={suPassword}
+                onChange={(e) => { setSuPassword(e.target.value); setSuError(null) }}
+                onKeyDown={(e) => e.key === 'Enter' && verifySuPassword()}
+                style={{ flex: 1 }} />
+              <button className="btn btn-secondary" onClick={() => setShowSuPasswordLogin(!showSuPasswordLogin)} type="button">
+                {showSuPasswordLogin ? '🙈' : '👁️'}
+              </button>
+            </div>
             {suError && <p style={{ color: 'var(--danger)', fontSize: '13px', marginTop: '8px' }}>❌ {suError}</p>}
           </div>
           <button className="btn btn-primary btn-block" onClick={verifySuPassword}>🔓 Accéder aux paramètres</button>
