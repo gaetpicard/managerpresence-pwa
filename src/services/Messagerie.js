@@ -61,6 +61,16 @@ export function ouvrirMessagerie(options) {
   window.open(lienMessagerie(options), '_blank', 'noopener')
 }
 
+/**
+ * Adresse de support du développeur, encodée comme dans l'application.
+ * Elle n'est pas secrète — elle est faite pour être contactée — mais écrite
+ * en clair dans le JavaScript, elle serait moissonnée par les robots
+ * collecteurs d'adresses qui parcourent les sites.
+ */
+export function adresseSupport() {
+  return atob('Y3Auc3VwcG9ydC5kZXZAZ21haWwuY29t')
+}
+
 /** Vrai si l'adresse d'envoi correspond à un webmail connu. */
 export function webmailReconnu(expediteur) {
   const from = String(expediteur || '').trim()

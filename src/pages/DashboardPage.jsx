@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import Layout from '../components/Layout'
 import { useApp } from '../App'
-import { ouvrirMessagerie } from '../services/Messagerie'
+import { ouvrirMessagerie, adresseSupport } from '../services/Messagerie'
 import { FirebaseService } from '../services/FirebaseService'
 
 function DashboardPage() {
@@ -46,7 +46,7 @@ function DashboardPage() {
     ].join('\n')
 
     ouvrirMessagerie({
-      destinataire: 'cp.support.dev@gmail.com',
+      destinataire: adresseSupport(),
       sujet: `ManagerPresence — ${clubName || 'structure'}`,
       corps: details,
       expediteur: ''
