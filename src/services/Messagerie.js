@@ -16,24 +16,33 @@ const WEBMAILS = [
   {
     domaines: ['gmail.com', 'googlemail.com'],
     // authuser force le compte quand plusieurs sessions Google sont ouvertes
-    url: ({ to, sujet, corps, from }) =>
-      `https://mail.google.com/mail/?view=cm&fs=1&to=${to}&su=${sujet}&body=${corps}&authuser=${from}`
+    url: ({ to, cci, sujet, corps, from }) =>
+      `https://mail.google.com/mail/?view=cm&fs=1&to=${to}&bcc=${cci}&su=${sujet}&body=${corps}&authuser=${from}`
   },
   {
     domaines: ['outlook.com', 'outlook.fr', 'hotmail.com', 'hotmail.fr', 'live.com', 'live.fr', 'msn.com'],
-    url: ({ to, sujet, corps }) =>
-      `https://outlook.live.com/mail/0/deeplink/compose?to=${to}&subject=${sujet}&body=${corps}`
+    url: ({ to, cci, sujet, corps }) =>
+      `https://outlook.live.com/mail/0/deeplink/compose?to=${to}&bcc=${cci}&subject=${sujet}&body=${corps}`
   },
   {
     domaines: ['yahoo.com', 'yahoo.fr'],
-    url: ({ to, sujet, corps }) =>
-      `https://compose.mail.yahoo.com/?to=${to}&subject=${sujet}&body=${corps}`
+    url: ({ to, cci, sujet, corps }) =>
+      `https://compose.mail.yahoo.com/?to=${to}&bcc=${cci}&subject=${sujet}&body=${corps}`
   }
 ]
 
-/** Construit l'adresse d'ouverture du message. */
-export function lienMessagerie({ destinataire, sujet = '', corps = '', expediteur = '' }) {
+/**
+ * Construit l'adresse d'ouverture du message.
+ *
+ * `copieCachee` reçoit la liste des destinataires d'un envoi groupé. Ils sont
+ * mis en copie cachée et non en destinataires : sans cela, chaque famille
+ * recevrait les adresses de toutes les autres.
+ */
+export function lienMessagerie({ destinataire, copieCachee = [], sujet = '', corps = '', expediteur = '' }) {
   const to = encodeURIComponent(destinataire || '')
+  const cci = encodeURIComponent(
+    (Array.isArray(copieCachee) ? copieCachee : [copieCachee]).filter(Boolean).join(',')
+  )
   const su = encodeURIComponent(sujet)
   const bd = encodeURIComponent(corps)
 
@@ -42,9 +51,9 @@ export function lienMessagerie({ destinataire, sujet = '', corps = '', expediteu
   const fournisseur = domaine && WEBMAILS.find(w => w.domaines.includes(domaine))
 
   if (fournisseur) {
-    return fournisseur.url({ to, sujet: su, corps: bd, from: encodeURIComponent(from) })
+    return fournisseur.url({ to, cci, sujet: su, corps: bd, from: encodeURIComponent(from) })
   }
-  return `mailto:${to}?subject=${su}&body=${bd}`
+  return `mailto:${to}?bcc=${cci}&subject=${su}&body=${bd}`
 }
 
 /** Ouvre la rédaction du message dans un nouvel onglet. */

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import Layout from '../components/Layout'
 import { FirebaseService } from '../services/FirebaseService'
 import { analyserCsv, fusionner } from '../services/ImportCsv'
+import { ouvrirMessagerie } from '../services/Messagerie'
 import { useApp } from '../App'
 
 function MembresPage() {
@@ -12,9 +13,13 @@ function MembresPage() {
   const [creneaux, setCreneaux] = useState([])
   const [isLoading, setIsLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState('')
-  const [filterGroupe, setFilterGroupe] = useState('')
   const [niveaux, setNiveaux] = useState([])
-  const [filterNiveau, setFilterNiveau] = useState('')
+  // Filtres cumulables : plusieurs groupes et plusieurs passeports à la fois
+  const [filtreGroupes, setFiltreGroupes] = useState([])
+  const [filtreNiveaux, setFiltreNiveaux] = useState([])
+  // Sélection pour l'envoi groupé
+  const [selection, setSelection] = useState(new Set())
+  const [expediteur, setExpediteur] = useState('')
   const [sortBy, setSortBy] = useState('nom')
   const [sortOrder, setSortOrder] = useState('asc')
   const [showModal, setShowModal] = useState(false)
@@ -45,14 +50,16 @@ function MembresPage() {
     setIsLoading(true)
     try {
       if (FirebaseService.isInitialized()) {
-        const [elevesData, creneauxData, niveauxData] = await Promise.all([
+        const [elevesData, creneauxData, niveauxData, configEmail] = await Promise.all([
           FirebaseService.getEleves(),
           FirebaseService.getCreneaux(),
-          FirebaseService.getNiveaux()
+          FirebaseService.getNiveaux(),
+          FirebaseService.getEmailConfig()
         ])
         setEleves(elevesData)
         setCreneaux(creneauxData)
         setNiveaux(niveauxData)
+        setExpediteur(configEmail?.emailFrom || '')
       }
     } catch (error) {
       console.error('Erreur chargement:', error)
@@ -87,12 +94,14 @@ function MembresPage() {
         (e.email || '').toLowerCase().includes(searchLower) ||
         (e.telephone || '').includes(searchTerm)
       
-      const matchGroupe = filterGroupe === '' || e.groupe === filterGroupe
+      // Aucun filtre coché = tout le monde. Sinon, il suffit de correspondre à
+      // l'un des choix : « jaunes ET orange » veut dire jaunes ou orange.
+      const matchGroupe = filtreGroupes.length === 0 || filtreGroupes.includes(e.groupe)
 
       const niveauxMembre = Array.isArray(e.niveauIds) ? e.niveauIds : []
-      const matchNiveau =
-        filterNiveau === '' ||
-        (filterNiveau === '__aucun' ? niveauxMembre.length === 0 : niveauxMembre.includes(filterNiveau))
+      const matchNiveau = filtreNiveaux.length === 0 || filtreNiveaux.some(f =>
+        f === '__aucun' ? niveauxMembre.length === 0 : niveauxMembre.includes(f)
+      )
 
       return matchSearch && matchGroupe && matchNiveau
     })
@@ -103,6 +112,51 @@ function MembresPage() {
         ? aVal.localeCompare(bVal)
         : bVal.localeCompare(aVal)
     })
+
+  /** Ajoute ou retire une valeur d'un filtre multiple. */
+  const basculerFiltre = (setter, valeur) => {
+    setter(prev => prev.includes(valeur) ? prev.filter(v => v !== valeur) : [...prev, valeur])
+  }
+
+  /** Coche tout ce qui est actuellement affiché, en gardant la sélection déjà faite. */
+  const selectionnerAffiches = () => {
+    setSelection(prev => {
+      const s = new Set(prev)
+      filteredAndSortedEleves.forEach(e => s.add(e.id))
+      return s
+    })
+  }
+
+  const basculerSelection = (id) => {
+    setSelection(prev => {
+      const s = new Set(prev)
+      if (s.has(id)) s.delete(id); else s.add(id)
+      return s
+    })
+  }
+
+  // Seuls les membres sélectionnés qui ont une adresse peuvent être destinataires
+  const avecEmail = eleves.filter(e => selection.has(e.id) && e.email && e.email.includes('@'))
+
+  /**
+   * Ouvre un message vers les personnes sélectionnées.
+   * Les adresses partent en copie cachée : sans cela, chaque famille
+   * recevrait la liste complète des adresses des autres.
+   */
+  const ecrireAuxSelectionnes = () => {
+    if (avecEmail.length === 0) return
+    const sansEmail = selection.size - avecEmail.length
+    ouvrirMessagerie({
+      destinataire: expediteur,        // le club s'écrit à lui-même
+      copieCachee: avecEmail.map(e => e.email),
+      sujet: '',
+      corps: 'Bonjour,\n\n',
+      expediteur
+    })
+    if (sansEmail > 0) {
+      showToast(`${sansEmail} membre(s) sans adresse n'ont pas été inclus`, 'info')
+    }
+  }
 
   /** Niveau le plus avancé d'un membre — celui que l'app utilise pour la couleur. */
   const niveauPrincipal = (eleve) => {
@@ -381,33 +435,6 @@ function MembresPage() {
             onChange={(e) => setSearchTerm(e.target.value)}
           />
         </div>
-        
-        <select
-          className="form-input form-select"
-          style={{ width: '150px' }}
-          value={filterGroupe}
-          onChange={(e) => setFilterGroupe(e.target.value)}
-        >
-          <option value="">Tous les groupes</option>
-          {uniqueGroupes.map(g => (
-            <option key={g} value={g}>{g}</option>
-          ))}
-        </select>
-
-        {niveaux.length > 0 && (
-          <select
-            className="form-input form-select"
-            style={{ width: '170px' }}
-            value={filterNiveau}
-            onChange={(e) => setFilterNiveau(e.target.value)}
-          >
-            <option value="">Tous les niveaux</option>
-            {niveaux.map(n => (
-              <option key={n.id} value={n.id}>{n.nom}</option>
-            ))}
-            <option value="__aucun">— Sans niveau —</option>
-          </select>
-        )}
 
         <div className="toolbar-actions">
           <button className="btn btn-secondary btn-sm" onClick={loadData}>
@@ -428,6 +455,119 @@ function MembresPage() {
           />
           <button className="btn btn-primary btn-sm" onClick={openAddModal}>
             ➕ Ajouter
+          </button>
+        </div>
+      </div>
+
+      {/* Filtres cumulables : plusieurs groupes et plusieurs passeports à la fois */}
+      <div className="card" style={{ marginBottom: 'var(--spacing-md)', padding: 'var(--spacing-md)' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '18px', alignItems: 'flex-start' }}>
+
+          {uniqueGroupes.length > 0 && (
+            <div>
+              <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '6px' }}>
+                GROUPES
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                {uniqueGroupes.map(g => {
+                  const actif = filtreGroupes.includes(g)
+                  return (
+                    <button
+                      key={g}
+                      className="btn btn-sm"
+                      onClick={() => basculerFiltre(setFiltreGroupes, g)}
+                      style={{
+                        background: actif ? 'var(--primary)' : 'var(--bg-elevated)',
+                        color: actif ? '#fff' : 'var(--text-secondary)',
+                        border: '1px solid rgba(255,255,255,0.15)'
+                      }}
+                    >
+                      {g}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          {niveaux.length > 0 && (
+            <div>
+              <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '6px' }}>
+                PASSEPORTS
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
+                {niveaux.map(n => {
+                  const actif = filtreNiveaux.includes(n.id)
+                  return (
+                    <button
+                      key={n.id}
+                      title={n.nom}
+                      onClick={() => basculerFiltre(setFiltreNiveaux, n.id)}
+                      style={{
+                        width: '26px', height: '26px', padding: 0,
+                        borderRadius: '50%', cursor: 'pointer',
+                        background: n.couleur,
+                        border: actif ? '3px solid var(--primary)' : '1px solid rgba(255,255,255,0.35)',
+                        boxShadow: actif ? '0 0 0 2px rgba(255,255,255,0.3)' : 'none'
+                      }}
+                    />
+                  )
+                })}
+                <button
+                  className="btn btn-sm"
+                  onClick={() => basculerFiltre(setFiltreNiveaux, '__aucun')}
+                  style={{
+                    background: filtreNiveaux.includes('__aucun') ? 'var(--primary)' : 'var(--bg-elevated)',
+                    color: filtreNiveaux.includes('__aucun') ? '#fff' : 'var(--text-secondary)',
+                    border: '1px solid rgba(255,255,255,0.15)'
+                  }}
+                >
+                  sans passeport
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
+              {filteredAndSortedEleves.length} / {eleves.length}
+            </span>
+            {(filtreGroupes.length > 0 || filtreNiveaux.length > 0) && (
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={() => { setFiltreGroupes([]); setFiltreNiveaux([]) }}
+              >
+                ✕ Effacer les filtres
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Sélection, pour écrire à plusieurs personnes d'un coup */}
+        <div style={{
+          display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center',
+          marginTop: '12px', paddingTop: '12px', borderTop: '1px solid rgba(255,255,255,0.1)'
+        }}>
+          <button className="btn btn-secondary btn-sm" onClick={selectionnerAffiches}>
+            ☑ Sélectionner les {filteredAndSortedEleves.length} affichés
+          </button>
+          {selection.size > 0 && (
+            <button className="btn btn-secondary btn-sm" onClick={() => setSelection(new Set())}>
+              ✕ Tout désélectionner
+            </button>
+          )}
+          <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
+            {selection.size} sélectionné(s)
+            {selection.size > 0 && avecEmail.length !== selection.size &&
+              ` — ${avecEmail.length} avec e-mail`}
+          </span>
+          <button
+            className="btn btn-primary btn-sm"
+            disabled={avecEmail.length === 0}
+            onClick={ecrireAuxSelectionnes}
+            style={{ marginLeft: 'auto' }}
+          >
+            ✉️ Écrire aux {avecEmail.length} sélectionné(s)
           </button>
         </div>
       </div>
@@ -457,6 +597,22 @@ function MembresPage() {
             <table className="table">
               <thead>
                 <tr>
+                  <th style={{ width: '36px' }}>
+                    <input
+                      type="checkbox"
+                      title="Sélectionner tout ce qui est affiché"
+                      checked={filteredAndSortedEleves.length > 0 &&
+                               filteredAndSortedEleves.every(e => selection.has(e.id))}
+                      onChange={(ev) => {
+                        if (ev.target.checked) selectionnerAffiches()
+                        else setSelection(prev => {
+                          const s = new Set(prev)
+                          filteredAndSortedEleves.forEach(e => s.delete(e.id))
+                          return s
+                        })
+                      }}
+                    />
+                  </th>
                   <th onClick={() => handleSort('nom')} style={{ cursor: 'pointer' }}>
                     Nom<SortIcon field="nom" />
                   </th>
@@ -479,6 +635,14 @@ function MembresPage() {
                     onClick={() => navigate(`/membre/${eleve.id}`)}
                     style={{ cursor: 'pointer' }}
                   >
+                    {/* Cocher ne doit pas ouvrir la fiche */}
+                    <td onClick={(ev) => ev.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        checked={selection.has(eleve.id)}
+                        onChange={() => basculerSelection(eleve.id)}
+                      />
+                    </td>
                     <td style={{ fontWeight: 600 }}>{eleve.nom || '-'}</td>
                     <td>{eleve.prenom || '-'}</td>
                     <td>
