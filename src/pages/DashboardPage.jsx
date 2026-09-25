@@ -1,12 +1,57 @@
 import React, { useState, useEffect } from 'react'
 import Layout from '../components/Layout'
 import { useApp } from '../App'
+import { ouvrirMessagerie } from '../services/Messagerie'
 import { FirebaseService } from '../services/FirebaseService'
 
 function DashboardPage() {
   const { licence, clubName, termes, projectId } = useApp()
   const [portailEnCours, setPortailEnCours] = useState(false)
   const [messageLicence, setMessageLicence] = useState(null)
+
+  // Une licence « permanente » est enregistrée à 36 500 jours (100 ans).
+  // Afficher « 36 452 jours restants » n'aurait aucun sens : on la présente
+  // comme ce qu'elle est.
+  const permanente = (licence?.joursRestants ?? 0) > 3650
+
+  /**
+   * Recharge le site en contournant le cache du navigateur.
+   * Contrairement à l'application, la PWA n'a pas d'APK à télécharger : la
+   * dernière version est servie à chaque ouverture. Seul un cache tenace peut
+   * retarder son affichage.
+   */
+  const verifierMiseAJour = async () => {
+    try {
+      if ('caches' in window) {
+        const noms = await caches.keys()
+        await Promise.all(noms.map(n => caches.delete(n)))
+      }
+    } catch (error) {
+      console.warn('Cache non vidé :', error)
+    }
+    window.location.reload(true)
+  }
+
+  /** Écrit au développeur avec les éléments utiles au dépannage. */
+  const contacterDeveloppeur = () => {
+    const details = [
+      `Structure : ${clubName || '(non renseignée)'}`,
+      `Identifiant du projet : ${projectId || '(inconnu)'}`,
+      `Licence : ${licence?.planNom || licence?.plan || '(inconnue)'}` +
+        (permanente ? ' — à vie' : ` — ${licence?.joursRestants ?? '?'} jours restants`),
+      `Accès : PWA (navigateur)`,
+      '',
+      'Décrivez ici le problème rencontré :',
+      ''
+    ].join('\n')
+
+    ouvrirMessagerie({
+      destinataire: 'cp.support.dev@gmail.com',
+      sujet: `ManagerPresence — ${clubName || 'structure'}`,
+      corps: details,
+      expediteur: ''
+    })
+  }
 
   /**
    * Ouvre le portail Stripe pour gérer l'abonnement (carte, résiliation…).
@@ -168,15 +213,26 @@ function DashboardPage() {
               <span className={`badge badge-${licence.plan}`}>
                 {licence.planNom || licence.plan?.toUpperCase()}
               </span>
+              {permanente && (
+                <span className="badge badge-success" style={{ marginLeft: '6px' }}>
+                  À VIE
+                </span>
+              )}
             </div>
             <div>
-              <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '4px' }}>Jours restants</p>
-              <p style={{ fontSize: '18px', fontWeight: '600' }}>{licence.joursRestants} jours</p>
+              <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '4px' }}>
+                {permanente ? 'Durée' : 'Jours restants'}
+              </p>
+              <p style={{ fontSize: '18px', fontWeight: '600' }}>
+                {permanente ? '♾️ Sans limite' : `${licence.joursRestants} jours`}
+              </p>
             </div>
             <div>
               <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '4px' }}>Expiration</p>
               <p style={{ fontSize: '14px' }}>
-                {new Date(licence.dateExpiration).toLocaleDateString('fr-FR')}
+                {permanente
+                  ? 'Aucune'
+                  : new Date(licence.dateExpiration).toLocaleDateString('fr-FR')}
               </p>
             </div>
             <div>
@@ -206,6 +262,27 @@ function DashboardPage() {
             </span>
           )}
         </div>
+      </div>
+
+      {/* Aide et informations */}
+      <div className="card">
+        <div className="card-header">
+          <h3 className="card-title">ℹ️ Aide et informations</h3>
+        </div>
+
+        <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+          <button className="btn btn-secondary" onClick={contacterDeveloppeur}>
+            ✉️ Contacter le développeur
+          </button>
+          <button className="btn btn-secondary" onClick={verifierMiseAJour}>
+            🔄 Vérifier les mises à jour
+          </button>
+        </div>
+
+        <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '10px' }}>
+          Le site se met à jour tout seul à chaque ouverture. Ce bouton force le
+          rechargement si une version récente ne s'affiche pas.
+        </p>
       </div>
 
       {/* Actions rapides */}
