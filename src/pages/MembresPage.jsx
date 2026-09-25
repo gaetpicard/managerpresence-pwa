@@ -111,15 +111,6 @@ function MembresPage() {
     return niveaux.filter(n => ids.includes(n.id)).sort((a, b) => b.ordre - a.ordre)[0] || null
   }
 
-  /** Texte lisible sur un fond clair comme sur un fond sombre. */
-  const couleurTexte = (hex) => {
-    const v = String(hex || '').replace('#', '')
-    if (v.length !== 6) return '#000'
-    const [r, g, b] = [0, 2, 4].map(i => parseInt(v.slice(i, i + 2), 16))
-    // luminance perçue
-    return (0.299 * r + 0.587 * g + 0.114 * b) > 150 ? '#000' : '#fff'
-  }
-
   const getGroupeBadgeClass = (groupe) => {
     const groupeNum = parseInt(groupe?.replace(/\D/g, '')) || 0
     if (groupeNum >= 1 && groupeNum <= 5) return `badge-g${groupeNum}`
@@ -134,7 +125,8 @@ function MembresPage() {
       groupe: '',
       telephone: '',
       email: '',
-      creneauxIds: []
+      creneauxIds: [],
+      niveauIds: []
     })
     setShowModal(true)
   }
@@ -147,9 +139,22 @@ function MembresPage() {
       groupe: eleve.groupe || '',
       telephone: eleve.telephone || eleve.tel || '',
       email: eleve.email || '',
-      creneauxIds: eleve.creneauxIds || []
+      creneauxIds: eleve.creneauxIds || [],
+      niveauIds: eleve.niveauIds || []
     })
     setShowModal(true)
+  }
+
+  const handleNiveauToggle = (niveauId) => {
+    setFormData(prev => {
+      const ids = prev.niveauIds || []
+      return {
+        ...prev,
+        niveauIds: ids.includes(niveauId)
+          ? ids.filter(id => id !== niveauId)
+          : [...ids, niveauId]
+      }
+    })
   }
 
   const handleCreneauToggle = (creneauId) => {
@@ -485,19 +490,21 @@ function MembresPage() {
                       {(() => {
                         const n = niveauPrincipal(eleve)
                         if (!n) return null
+                        // Une simple pastille : le nom du niveau est dans l'infobulle
                         return (
                           <span
-                            className="badge"
-                            title={`Niveau : ${n.nom}`}
+                            title={n.nom}
                             style={{
+                              display: 'inline-block',
+                              width: '14px', height: '14px',
+                              borderRadius: '50%',
                               background: n.couleur,
-                              color: couleurTexte(n.couleur),
-                              border: '1px solid rgba(0,0,0,0.2)',
-                              marginLeft: eleve.groupe ? '6px' : 0
+                              border: '1px solid rgba(255,255,255,0.45)',
+                              boxShadow: '0 0 0 1px rgba(0,0,0,0.35)',
+                              verticalAlign: 'middle',
+                              marginLeft: eleve.groupe ? '8px' : 0
                             }}
-                          >
-                            {n.nom}
-                          </span>
+                          />
                         )
                       })()}
                     </td>
@@ -838,6 +845,55 @@ function MembresPage() {
                       </label>
                     ))}
                   </div>
+                </div>
+              )}
+
+              {niveaux.length > 0 && (
+                <div className="form-group">
+                  <label className="form-label">
+                    Passeport / niveau
+                    {(formData.niveauIds?.length > 0) && (
+                      <span style={{ opacity: 0.7, fontWeight: 400 }}>
+                        {' '}— {niveaux.filter(n => formData.niveauIds.includes(n.id)).map(n => n.nom).join(', ')}
+                      </span>
+                    )}
+                  </label>
+                  <div style={{
+                    display: 'flex', flexWrap: 'wrap', gap: '10px',
+                    padding: '12px',
+                    background: 'var(--bg-input)',
+                    borderRadius: 'var(--radius-md)'
+                  }}>
+                    {niveaux.map(n => {
+                      const actif = formData.niveauIds?.includes(n.id)
+                      return (
+                        <label
+                          key={n.id}
+                          title={n.nom}
+                          style={{ cursor: 'pointer', lineHeight: 0 }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={Boolean(actif)}
+                            onChange={() => handleNiveauToggle(n.id)}
+                            style={{ display: 'none' }}
+                          />
+                          <span style={{
+                            display: 'inline-block',
+                            width: '30px', height: '30px',
+                            borderRadius: '50%',
+                            background: n.couleur,
+                            // le niveau retenu se distingue par un anneau, pas par du texte
+                            border: actif ? '3px solid var(--primary)' : '1px solid rgba(255,255,255,0.35)',
+                            boxShadow: actif ? '0 0 0 2px rgba(255,255,255,0.25)' : 'none'
+                          }} />
+                        </label>
+                      )
+                    })}
+                  </div>
+                  <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '6px' }}>
+                    Touchez une pastille pour attribuer ou retirer le passeport.
+                  </p>
                 </div>
               )}
             </div>

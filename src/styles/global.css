@@ -474,6 +474,17 @@ a {
   padding-right: 40px;
 }
 
+/*
+ * La liste ouverte est dessinée par le système, sur fond blanc, alors que le
+ * champ hérite du thème sombre et d'un texte blanc : les options devenaient
+ * illisibles (blanc sur blanc). On impose donc leurs couleurs.
+ */
+select option,
+select optgroup {
+  background-color: #2A2A2A;
+  color: #FFFFFF;
+}
+
 .form-row {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
