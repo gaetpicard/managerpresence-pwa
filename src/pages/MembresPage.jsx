@@ -35,6 +35,7 @@ function MembresPage() {
   const [importData, setImportData] = useState(null)
   const [importEnCours, setImportEnCours] = useState(false)
   const [importProgression, setImportProgression] = useState(0)
+  const [aideImport, setAideImport] = useState(false)
 
   useEffect(() => {
     loadData()
@@ -548,7 +549,11 @@ function MembresPage() {
       {/* Aperçu avant import CSV */}
       {importData && (
         <div className="modal-overlay" onClick={() => !importEnCours && setImportData(null)}>
-          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '760px' }}>
+          <div
+            className="modal"
+            onClick={e => e.stopPropagation()}
+            style={{ width: 'min(680px, 96vw)', maxWidth: '96vw' }}
+          >
             <div className="modal-header">
               <h2 className="modal-title">📥 Importer {importData.nomFichier}</h2>
               {!importEnCours && (
@@ -558,25 +563,47 @@ function MembresPage() {
 
             <div className="modal-body">
               {(() => {
-                const total = importData.lignes.length
-                const retenues = importData.lignes.filter(l => l.selectionne).length
-                const doublons = importData.lignes.filter(l => l.doublon).length
-                const anomalies = importData.lignes.filter(l => l.anomalies.length > 0).length
-                const colonnesVues = Object.entries(importData.colonnes)
-                  .filter(([, i]) => i >= 0)
-                  .map(([champ, i]) => `${champ} → « ${importData.enTetes[i]} »`)
+                const aCreer = importData.lignes.filter(l => l.selectionne && l.action === 'creer').length
+                const aMaj = importData.lignes.filter(l => l.selectionne && l.action === 'maj').length
+                const sansChangement = importData.lignes.filter(l => !l.selectionne).length
 
                 return (
                   <>
-                    <p style={{ fontSize: '0.85rem', marginTop: 0 }}>
-                      <strong>{total}</strong> ligne(s) lue(s) — <strong>{retenues}</strong> à importer
-                      {doublons > 0 && <> · {doublons} doublon(s) écarté(s)</>}
-                      {anomalies > 0 && <> · {anomalies} avec anomalie</>}
+                    <p style={{ fontSize: '0.9rem', marginTop: 0 }}>
+                      <strong>{importData.lignes.length}</strong> ligne(s) dans le fichier :{' '}
+                      <span style={{ color: '#67c23a' }}>{aCreer} à ajouter</span> ·{' '}
+                      <span style={{ color: '#409eff' }}>{aMaj} à compléter</span> ·{' '}
+                      <span style={{ opacity: 0.7 }}>{sansChangement} sans changement</span>
                     </p>
 
-                    <p style={{ fontSize: '0.78rem', opacity: 0.75 }}>
-                      Colonnes reconnues : {colonnesVues.length ? colonnesVues.join(' · ') : 'aucune'}
-                    </p>
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => setAideImport(v => !v)}
+                      style={{ marginBottom: '8px' }}
+                    >
+                      ❓ Que veulent dire ces mentions ?
+                    </button>
+
+                    {aideImport && (
+                      <div style={{
+                        background: 'rgba(0,0,0,0.05)', borderRadius: '8px',
+                        padding: '10px 12px', fontSize: '0.82rem', lineHeight: 1.6,
+                        marginBottom: '10px'
+                      }}>
+                        <div><span style={{ color: '#67c23a' }}>✓ Nouveau</span> — cette personne n'est pas
+                          encore dans la base : elle sera ajoutée.</div>
+                        <div><span style={{ color: '#409eff' }}>↻ À compléter</span> — la personne existe
+                          déjà, et le fichier apporte une information absente de sa fiche. Rien n'est
+                          remplacé : on ne fait qu'ajouter.</div>
+                        <div><span style={{ color: '#e6a23c' }}>⚠️ Valeur différente</span> — la fiche et le
+                          fichier ne disent pas la même chose. Par précaution la fiche garde sa valeur ;
+                          cochez « remplacer » pour prendre celle du fichier.</div>
+                        <div style={{ opacity: 0.8, marginTop: '4px' }}>
+                          Une adresse « * » dans la fiche vient d'un ancien import défectueux de
+                          l'application : dans ce cas, cochez « remplacer » sans hésiter.
+                        </div>
+                      </div>
+                    )}
 
                     <div style={{ display: 'flex', gap: '8px', margin: '10px 0' }}>
                       <button className="btn btn-secondary btn-sm" disabled={importEnCours}
@@ -585,78 +612,102 @@ function MembresPage() {
                               onClick={() => toutSelectionner(false)}>Tout décocher</button>
                     </div>
 
-                    <div style={{ maxHeight: '320px', overflow: 'auto' }}>
-                      <table className="table" style={{ fontSize: '0.8rem' }}>
-                        <thead>
-                          <tr>
-                            <th style={{ width: '34px' }}></th>
-                            <th>Nom</th>
-                            <th>Prénom</th>
-                            <th>E-mail</th>
-                            <th>Téléphone</th>
-                            <th>État</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {importData.lignes.map(ligne => (
-                            <tr key={ligne.numeroLigne}
-                                style={{ opacity: ligne.selectionne ? 1 : 0.5 }}>
-                              <td>
-                                <input
-                                  type="checkbox"
-                                  checked={ligne.selectionne}
-                                  disabled={importEnCours || ligne.anomalies.includes('Nom et prénom vides')}
-                                  onChange={() => basculerLigne(ligne.numeroLigne)}
-                                />
-                              </td>
-                              <td>{ligne.nom}</td>
-                              <td>{ligne.prenom}</td>
-                              <td>{ligne.email}</td>
-                              <td>{ligne.telephones.map(t => t.numero).join(' / ')}</td>
-                              <td>
-                                {ligne.anomalies.length > 0 && (
-                                  <span style={{ color: '#f56c6c' }}>{ligne.anomalies.join(', ')} · </span>
-                                )}
+                    {/* Une fiche par bloc : lisible à toute largeur, sans défilement latéral */}
+                    <div style={{ maxHeight: '46vh', overflowY: 'auto', overflowX: 'hidden' }}>
+                      {importData.lignes.map(ligne => {
+                        const bloquee = ligne.anomalies.includes('Nom et prénom vides')
+                        return (
+                          <div
+                            key={ligne.numeroLigne}
+                            style={{
+                              border: '1px solid rgba(0,0,0,0.12)', borderRadius: '8px',
+                              padding: '10px 12px', marginBottom: '8px',
+                              opacity: ligne.selectionne ? 1 : 0.6,
+                              overflowWrap: 'anywhere'
+                            }}
+                          >
+                            <label style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
+                              <input
+                                type="checkbox"
+                                checked={ligne.selectionne}
+                                disabled={importEnCours || bloquee}
+                                onChange={() => basculerLigne(ligne.numeroLigne)}
+                                style={{ marginTop: '3px' }}
+                              />
+                              <span style={{ flex: 1, minWidth: 0 }}>
+                                <span style={{ fontWeight: 600 }}>
+                                  {(ligne.nom || '').toUpperCase()} {ligne.prenom}
+                                </span>
 
-                                {!ligne.doublon && ligne.anomalies.length === 0 && (
-                                  <span style={{ color: '#67c23a' }}>✓ nouveau</span>
-                                )}
+                                <div style={{ fontSize: '0.8rem', opacity: 0.8, marginTop: '2px' }}>
+                                  {ligne.email || 'sans e-mail'}
+                                  {ligne.telephones.length > 0 && ' · ' + ligne.telephones.map(t => t.numero).join(' / ')}
+                                </div>
 
-                                {ligne.doublon && ligne.action === 'maj' && (
-                                  <span style={{ color: '#409eff' }}>
-                                    ↻ fiche complétée : {ligne.complements.map(c => c.libelle).join(', ')}
-                                  </span>
-                                )}
+                                <div style={{ fontSize: '0.82rem', marginTop: '4px' }}>
+                                  {ligne.anomalies.length > 0 && (
+                                    <div style={{ color: '#f56c6c' }}>⚠️ {ligne.anomalies.join(', ')}</div>
+                                  )}
+                                  {!ligne.doublon && ligne.anomalies.length === 0 && (
+                                    <span style={{ color: '#67c23a' }}>✓ Nouveau — sera ajouté</span>
+                                  )}
+                                  {ligne.doublon && ligne.action === 'maj' && (
+                                    <span style={{ color: '#409eff' }}>
+                                      ↻ Déjà dans la base — à compléter :{' '}
+                                      {ligne.complements.map(c => c.libelle).join(', ')}
+                                    </span>
+                                  )}
+                                  {ligne.doublon && ligne.action === 'ignorer' && (
+                                    <span style={{ opacity: 0.7 }}>
+                                      Déjà dans la base, rien de nouveau à ajouter
+                                    </span>
+                                  )}
+                                </div>
+                              </span>
+                            </label>
 
-                                {ligne.doublon && ligne.action === 'ignorer' && (
-                                  <span style={{ color: '#e6a23c' }}>⚠️ {ligne.doublon}, rien à ajouter</span>
-                                )}
-
-                                {ligne.differences && ligne.differences.length > 0 && (
-                                  <div style={{ marginTop: '4px', fontSize: '0.75rem', color: '#e6a23c' }}>
-                                    {ligne.differences.map(d => (
-                                      <div key={d.champ}>
-                                        {d.libelle} : « {String(d.ancien)} » dans la base, « {String(d.nouveau)} » dans le fichier
-                                        {' '}
-                                        <label style={{ cursor: 'pointer' }}>
-                                          <input
-                                            type="checkbox"
-                                            disabled={importEnCours}
-                                            checked={(ligne.champsForces || []).includes(d.champ)}
-                                            onChange={() => forcerChamp(ligne.numeroLigne, d.champ)}
-                                          />{' '}
-                                          remplacer
-                                        </label>
-                                      </div>
-                                    ))}
+                            {ligne.differences && ligne.differences.length > 0 && (
+                              <div style={{ marginTop: '8px', paddingLeft: '28px' }}>
+                                {ligne.differences.map(d => (
+                                  <div
+                                    key={d.champ}
+                                    style={{
+                                      background: 'rgba(230,162,60,0.12)', borderRadius: '6px',
+                                      padding: '6px 8px', marginTop: '4px', fontSize: '0.8rem'
+                                    }}
+                                  >
+                                    <div style={{ color: '#e6a23c', fontWeight: 600 }}>
+                                      ⚠️ {d.libelle} différent
+                                    </div>
+                                    <div>Fiche actuelle : <strong>{String(d.ancien) || '(vide)'}</strong></div>
+                                    <div>Fichier : <strong>{String(d.nouveau)}</strong></div>
+                                    <label style={{ cursor: 'pointer', display: 'inline-block', marginTop: '4px' }}>
+                                      <input
+                                        type="checkbox"
+                                        disabled={importEnCours}
+                                        checked={(ligne.champsForces || []).includes(d.champ)}
+                                        onChange={() => forcerChamp(ligne.numeroLigne, d.champ)}
+                                      />{' '}
+                                      remplacer par la valeur du fichier
+                                    </label>
                                   </div>
-                                )}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })}
                     </div>
+
+                    <details style={{ marginTop: '10px', fontSize: '0.78rem', opacity: 0.8 }}>
+                      <summary style={{ cursor: 'pointer' }}>Colonnes reconnues dans le fichier</summary>
+                      <div style={{ marginTop: '6px' }}>
+                        {Object.entries(importData.colonnes)
+                          .filter(([, i]) => i >= 0)
+                          .map(([champ, i]) => `${champ} → « ${importData.enTetes[i]} »`)
+                          .join(' · ') || 'aucune'}
+                      </div>
+                    </details>
 
                     {importEnCours && (
                       <p style={{ fontSize: '0.85rem', marginBottom: 0 }}>
@@ -676,7 +727,7 @@ function MembresPage() {
                       onClick={lancerImport}>
                 {importEnCours
                   ? `Import… ${importProgression} %`
-                  : `Importer ${importData.lignes.filter(l => l.selectionne).length} membre(s)`}
+                  : `Valider (${importData.lignes.filter(l => l.selectionne).length})`}
               </button>
             </div>
           </div>
