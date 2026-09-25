@@ -171,6 +171,38 @@ export const FirebaseService = {
   },
 
   // ========================================
+  // NIVEAUX / PASSEPORTS / CEINTURES
+  // ========================================
+
+  /**
+   * Niveaux de la structure, triés comme dans l'application.
+   * `couleur` est stockée par l'app en ARGB (entier) : on la convertit en
+   * couleur CSS #RRGGBB, la composante alpha n'ayant pas de sens ici.
+   */
+  async getNiveaux() {
+    if (!db) return []
+    try {
+      const snapshot = await getDocs(collection(db, 'niveaux'))
+      return snapshot.docs
+        .map(d => {
+          const data = d.data()
+          const argb = Number(data.couleur ?? 0xFFCCCCCC)
+          const rvb = (argb & 0xFFFFFF).toString(16).padStart(6, '0')
+          return {
+            id: d.id,
+            nom: data.nom || '',
+            ordre: Number(data.ordre ?? 0),
+            couleur: `#${rvb}`
+          }
+        })
+        .sort((a, b) => a.ordre - b.ordre)
+    } catch (error) {
+      console.error('Erreur getNiveaux:', error)
+      return []
+    }
+  },
+
+  // ========================================
   // CRÉNEAUX
   // ========================================
 

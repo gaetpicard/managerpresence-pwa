@@ -83,6 +83,81 @@ export function detecterColonnes(enTetes) {
   )
 }
 
+const LIBELLES_CHAMPS = {
+  email: 'e-mail',
+  telephones: 'téléphone',
+  libelle: 'catégorie',
+  numero_licence: 'n° de licence'
+}
+
+/**
+ * Compare une ligne du fichier à la fiche déjà enregistrée.
+ * - complements : la base est vide, le fichier apporte l'information
+ * - differences : les deux sont renseignés et ne disent pas la même chose
+ */
+function comparerAvecExistant(existant, apport) {
+  const complements = []
+  const differences = []
+
+  const ajouter = (champ, ancien, nouveau) => {
+    if (!nouveau) return
+    if (!ancien) complements.push({ champ, libelle: LIBELLES_CHAMPS[champ], nouveau })
+    else if (String(ancien).trim() !== String(nouveau).trim()) {
+      differences.push({ champ, libelle: LIBELLES_CHAMPS[champ], ancien, nouveau })
+    }
+  }
+
+  ajouter('email', existant.email, apport.email)
+  ajouter('libelle', existant.libelle || existant.groupe, apport.libelle)
+  ajouter('numero_licence', existant.numero_licence, apport.numero_licence)
+
+  // Téléphones : on compare les numéros, sans tenir compte de l'ordre
+  const actuels = (Array.isArray(existant.telephones) ? existant.telephones : [])
+    .map(t => t && t.numero).filter(Boolean)
+  const nouveaux = apport.telephones.map(t => t.numero).filter(Boolean)
+  const inedits = nouveaux.filter(n => !actuels.includes(n))
+  if (inedits.length) {
+    if (!actuels.length) {
+      complements.push({ champ: 'telephones', libelle: LIBELLES_CHAMPS.telephones, nouveau: inedits.join(' / ') })
+    } else {
+      // Un numéro de plus ne remplace rien : c'est un ajout, donc un complément
+      complements.push({ champ: 'telephones', libelle: 'téléphone supplémentaire', nouveau: inedits.join(' / ') })
+    }
+  }
+
+  return { complements, differences }
+}
+
+/**
+ * Fiche mise à jour : les compléments sont appliqués, les numéros ajoutés à
+ * la suite des existants. Les valeurs divergentes ne sont reprises que si
+ * elles figurent dans `champsForces`.
+ */
+export function fusionner(existant, ligne, champsForces = []) {
+  const sortie = { ...existant }
+
+  ligne.complements.forEach(c => {
+    if (c.champ === 'telephones') return          // traité plus bas
+    sortie[c.champ] = c.nouveau
+  })
+
+  ligne.differences.forEach(d => {
+    if (champsForces.includes(d.champ)) sortie[d.champ] = d.nouveau
+  })
+
+  const actuels = Array.isArray(existant.telephones) ? [...existant.telephones] : []
+  const connus = actuels.map(t => t && t.numero).filter(Boolean)
+  ligne.telephones.forEach(t => {
+    if (t.numero && !connus.includes(t.numero)) {
+      actuels.push(t)
+      connus.push(t.numero)
+    }
+  })
+  sortie.telephones = actuels
+
+  return sortie
+}
+
 const EMAIL_VALIDE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
 
 /** Ne garde que les chiffres et le + initial. */
@@ -143,26 +218,48 @@ export function analyserCsv(contenu, elevesExistants = []) {
 
     const cle = cleNom(nom, prenom)
     let doublon = null
-    if (nomsExistants.has(cle)) doublon = 'déjà dans la base'
-    else if (email && emailsExistants.has(norm(email))) doublon = 'e-mail déjà utilisé'
-    else if (vusDansFichier.has(cle)) doublon = 'en double dans le fichier'
+    let existant = null
+    if (nomsExistants.has(cle)) {
+      doublon = 'déjà dans la base'
+      existant = nomsExistants.get(cle)
+    } else if (email && emailsExistants.has(norm(email))) {
+      doublon = 'e-mail déjà utilisé'
+      existant = emailsExistants.get(norm(email))
+    } else if (vusDansFichier.has(cle)) {
+      doublon = 'en double dans le fichier'
+    }
     vusDansFichier.add(cle)
 
     const telephones = []
     if (tel) telephones.push({ numero: tel, libelle: '', actifSMS: true })
     if (tel2) telephones.push({ numero: tel2, libelle: '', actifSMS: true })
 
+    const libelle = valeur(champs, colonnes.libelle)
+    const licence = valeur(champs, colonnes.licence)
+
+    // Ce que le fichier apporterait à une fiche déjà présente
+    const apports = existant
+      ? comparerAvecExistant(existant, { email, telephones, libelle, numero_licence: licence })
+      : { complements: [], differences: [] }
+
     return {
       numeroLigne: i + 2,           // +2 : l'en-tête compte, et on part de 1
       nom, prenom, email, telephones,
-      libelle: valeur(champs, colonnes.libelle),
-      numero_licence: valeur(champs, colonnes.licence),
+      libelle,
+      numero_licence: licence,
       creneauxIds: [],
       niveauIds: [],
       anomalies,
       doublon,
-      // Importable par défaut : ni bloquant, ni doublon
-      selectionne: anomalies.length === 0 && !doublon
+      existant,
+      complements: apports.complements,     // champs vides dans la base
+      differences: apports.differences,     // champs renseignés mais différents
+      // Nouveau : importable. Déjà présent : proposé en mise à jour s'il y a
+      // quelque chose à compléter. Un écart de valeur n'est jamais appliqué
+      // sans décision explicite.
+      action: doublon ? (existant && apports.complements.length ? 'maj' : 'ignorer') : 'creer',
+      selectionne: anomalies.length === 0 &&
+        (!doublon || (Boolean(existant) && apports.complements.length > 0))
     }
   })
 

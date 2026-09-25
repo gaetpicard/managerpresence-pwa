@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import Layout from '../components/Layout'
 import { FirebaseService } from '../services/FirebaseService'
-import { analyserCsv } from '../services/ImportCsv'
+import { analyserCsv, fusionner } from '../services/ImportCsv'
 import { useApp } from '../App'
 
 function MembresPage() {
@@ -13,6 +13,8 @@ function MembresPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState('')
   const [filterGroupe, setFilterGroupe] = useState('')
+  const [niveaux, setNiveaux] = useState([])
+  const [filterNiveau, setFilterNiveau] = useState('')
   const [sortBy, setSortBy] = useState('nom')
   const [sortOrder, setSortOrder] = useState('asc')
   const [showModal, setShowModal] = useState(false)
@@ -42,12 +44,14 @@ function MembresPage() {
     setIsLoading(true)
     try {
       if (FirebaseService.isInitialized()) {
-        const [elevesData, creneauxData] = await Promise.all([
+        const [elevesData, creneauxData, niveauxData] = await Promise.all([
           FirebaseService.getEleves(),
-          FirebaseService.getCreneaux()
+          FirebaseService.getCreneaux(),
+          FirebaseService.getNiveaux()
         ])
         setEleves(elevesData)
         setCreneaux(creneauxData)
+        setNiveaux(niveauxData)
       }
     } catch (error) {
       console.error('Erreur chargement:', error)
@@ -83,8 +87,13 @@ function MembresPage() {
         (e.telephone || '').includes(searchTerm)
       
       const matchGroupe = filterGroupe === '' || e.groupe === filterGroupe
-      
-      return matchSearch && matchGroupe
+
+      const niveauxMembre = Array.isArray(e.niveauIds) ? e.niveauIds : []
+      const matchNiveau =
+        filterNiveau === '' ||
+        (filterNiveau === '__aucun' ? niveauxMembre.length === 0 : niveauxMembre.includes(filterNiveau))
+
+      return matchSearch && matchGroupe && matchNiveau
     })
     .sort((a, b) => {
       const aVal = (a[sortBy] || '').toLowerCase()
@@ -93,6 +102,22 @@ function MembresPage() {
         ? aVal.localeCompare(bVal)
         : bVal.localeCompare(aVal)
     })
+
+  /** Niveau le plus avancé d'un membre — celui que l'app utilise pour la couleur. */
+  const niveauPrincipal = (eleve) => {
+    const ids = Array.isArray(eleve.niveauIds) ? eleve.niveauIds : []
+    if (!ids.length) return null
+    return niveaux.filter(n => ids.includes(n.id)).sort((a, b) => b.ordre - a.ordre)[0] || null
+  }
+
+  /** Texte lisible sur un fond clair comme sur un fond sombre. */
+  const couleurTexte = (hex) => {
+    const v = String(hex || '').replace('#', '')
+    if (v.length !== 6) return '#000'
+    const [r, g, b] = [0, 2, 4].map(i => parseInt(v.slice(i, i + 2), 16))
+    // luminance perçue
+    return (0.299 * r + 0.587 * g + 0.114 * b) > 150 ? '#000' : '#fff'
+  }
 
   const getGroupeBadgeClass = (groupe) => {
     const groupeNum = parseInt(groupe?.replace(/\D/g, '')) || 0
@@ -203,6 +228,27 @@ function MembresPage() {
     }))
   }
 
+  /** Autorise le remplacement d'une valeur qui diffère de celle de la base. */
+  const forcerChamp = (numeroLigne, champ) => {
+    setImportData(prev => ({
+      ...prev,
+      lignes: prev.lignes.map(l => {
+        if (l.numeroLigne !== numeroLigne) return l
+        const forces = l.champsForces || []
+        const nouveaux = forces.includes(champ)
+          ? forces.filter(c => c !== champ)
+          : [...forces, champ]
+        return {
+          ...l,
+          champsForces: nouveaux,
+          // Remplacer une valeur suffit à justifier la mise à jour de la fiche
+          action: l.existant && (nouveaux.length || l.complements.length) ? 'maj' : l.action,
+          selectionne: l.selectionne || nouveaux.length > 0
+        }
+      })
+    }))
+  }
+
   const toutSelectionner = (valeur) => {
     setImportData(prev => ({
       ...prev,
@@ -223,20 +269,29 @@ function MembresPage() {
     let reussis = 0
     const echecs = []
 
+    let misesAJour = 0
+
     for (let i = 0; i < aImporter.length; i++) {
       const ligne = aImporter[i]
       try {
-        await FirebaseService.addEleve({
-          nom: ligne.nom,
-          prenom: ligne.prenom,
-          email: ligne.email,
-          telephones: ligne.telephones,
-          libelle: ligne.libelle,
-          numero_licence: ligne.numero_licence,
-          creneauxIds: [],
-          niveauIds: []
-        })
-        reussis++
+        if (ligne.existant && ligne.action === 'maj') {
+          // Complète la fiche existante sans écraser ce qui est déjà renseigné
+          const fusionnee = fusionner(ligne.existant, ligne, ligne.champsForces || [])
+          await FirebaseService.updateEleve(ligne.existant.id, fusionnee)
+          misesAJour++
+        } else {
+          await FirebaseService.addEleve({
+            nom: ligne.nom,
+            prenom: ligne.prenom,
+            email: ligne.email,
+            telephones: ligne.telephones,
+            libelle: ligne.libelle,
+            numero_licence: ligne.numero_licence,
+            creneauxIds: [],
+            niveauIds: []
+          })
+          reussis++
+        }
       } catch (error) {
         console.error(`Ligne ${ligne.numeroLigne} :`, error)
         echecs.push(`${ligne.nom} ${ligne.prenom}`.trim() || `ligne ${ligne.numeroLigne}`)
@@ -246,7 +301,7 @@ function MembresPage() {
 
     await FirebaseService.addAuditLog(
       'IMPORT_CSV',
-      `${reussis} ${termes.eleves.toLowerCase()}`,
+      `${reussis} créé(s), ${misesAJour} mis à jour`,
       `Import depuis la PWA (${importData.nomFichier})`
     )
 
@@ -254,10 +309,15 @@ function MembresPage() {
     setImportData(null)
     await loadData()
 
+    const bilan = [
+      reussis ? `${reussis} ajouté(s)` : null,
+      misesAJour ? `${misesAJour} mis à jour` : null
+    ].filter(Boolean).join(', ') || 'rien à importer'
+
     if (echecs.length === 0) {
-      showToast(`${reussis} membre(s) importé(s)`, 'success')
+      showToast(bilan, 'success')
     } else {
-      showToast(`${reussis} importé(s), ${echecs.length} en échec : ${echecs.slice(0, 3).join(', ')}`, 'error')
+      showToast(`${bilan} — ${echecs.length} en échec : ${echecs.slice(0, 3).join(', ')}`, 'error')
     }
   }
 
@@ -327,6 +387,21 @@ function MembresPage() {
             <option key={g} value={g}>{g}</option>
           ))}
         </select>
+
+        {niveaux.length > 0 && (
+          <select
+            className="form-input form-select"
+            style={{ width: '170px' }}
+            value={filterNiveau}
+            onChange={(e) => setFilterNiveau(e.target.value)}
+          >
+            <option value="">Tous les niveaux</option>
+            {niveaux.map(n => (
+              <option key={n.id} value={n.id}>{n.nom}</option>
+            ))}
+            <option value="__aucun">— Sans niveau —</option>
+          </select>
+        )}
 
         <div className="toolbar-actions">
           <button className="btn btn-secondary btn-sm" onClick={loadData}>
@@ -406,6 +481,24 @@ function MembresPage() {
                           {eleve.groupe}
                         </span>
                       )}
+                      {(() => {
+                        const n = niveauPrincipal(eleve)
+                        if (!n) return null
+                        return (
+                          <span
+                            className="badge"
+                            title={`Niveau : ${n.nom}`}
+                            style={{
+                              background: n.couleur,
+                              color: couleurTexte(n.couleur),
+                              border: '1px solid rgba(0,0,0,0.2)',
+                              marginLeft: eleve.groupe ? '6px' : 0
+                            }}
+                          >
+                            {n.nom}
+                          </span>
+                        )
+                      })()}
                     </td>
                     <td style={{ color: 'var(--text-secondary)' }}>
                       {eleve.telephone || eleve.tel || '-'}
@@ -521,16 +614,42 @@ function MembresPage() {
                               <td>{ligne.email}</td>
                               <td>{ligne.telephones.map(t => t.numero).join(' / ')}</td>
                               <td>
-                                {ligne.doublon && (
-                                  <span style={{ color: '#e6a23c' }}>⚠️ {ligne.doublon}</span>
-                                )}
                                 {ligne.anomalies.length > 0 && (
-                                  <span style={{ color: '#f56c6c' }}>
-                                    {ligne.doublon ? ' · ' : ''}{ligne.anomalies.join(', ')}
-                                  </span>
+                                  <span style={{ color: '#f56c6c' }}>{ligne.anomalies.join(', ')} · </span>
                                 )}
+
                                 {!ligne.doublon && ligne.anomalies.length === 0 && (
                                   <span style={{ color: '#67c23a' }}>✓ nouveau</span>
+                                )}
+
+                                {ligne.doublon && ligne.action === 'maj' && (
+                                  <span style={{ color: '#409eff' }}>
+                                    ↻ fiche complétée : {ligne.complements.map(c => c.libelle).join(', ')}
+                                  </span>
+                                )}
+
+                                {ligne.doublon && ligne.action === 'ignorer' && (
+                                  <span style={{ color: '#e6a23c' }}>⚠️ {ligne.doublon}, rien à ajouter</span>
+                                )}
+
+                                {ligne.differences && ligne.differences.length > 0 && (
+                                  <div style={{ marginTop: '4px', fontSize: '0.75rem', color: '#e6a23c' }}>
+                                    {ligne.differences.map(d => (
+                                      <div key={d.champ}>
+                                        {d.libelle} : « {String(d.ancien)} » dans la base, « {String(d.nouveau)} » dans le fichier
+                                        {' '}
+                                        <label style={{ cursor: 'pointer' }}>
+                                          <input
+                                            type="checkbox"
+                                            disabled={importEnCours}
+                                            checked={(ligne.champsForces || []).includes(d.champ)}
+                                            onChange={() => forcerChamp(ligne.numeroLigne, d.champ)}
+                                          />{' '}
+                                          remplacer
+                                        </label>
+                                      </div>
+                                    ))}
+                                  </div>
                                 )}
                               </td>
                             </tr>
