@@ -7,7 +7,28 @@
  * reconnu de la même façon des deux côtés.
  */
 
-const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '').trim()
+/**
+ * Forme de comparaison d'un texte : sans accents, sans ponctuation, sans casse.
+ *
+ * La version précédente supprimait purement et simplement les lettres
+ * accentuées : « Neuvéglise » devenait « neuvglise » et ne correspondait plus
+ * à « Neuveglise ». Deux fiches étaient alors créées pour la même personne.
+ * On décompose donc les caractères (NFD) pour retirer les seuls signes
+ * diacritiques, en gardant la lettre de base.
+ */
+const norm = (s) => String(s || '')
+  .normalize('NFD')
+  .replace(/[̀-ͯ]/g, '')   // accents, cédilles, trémas…
+  .toLowerCase()
+  .replace(/[^a-z0-9]/g, '')
+  .trim()
+
+/**
+ * Nom ou prénom propre : espaces de début, de fin et espaces multiples
+ * supprimés. Les exports de contacts en contiennent très souvent
+ * (« Emilie », « BLANQUET »), ce qui fausse ensuite le tri et les doublons.
+ */
+const nettoyerNom = (s) => String(s || '').replace(/\s+/g, ' ').trim()
 
 const CLES = {
   prenom: ['prenom', 'firstname', 'first', 'givenname', 'prenomnom', 'prenom1', 'pren', 'forename', 'fname'],
@@ -158,6 +179,33 @@ export function fusionner(existant, ligne, champsForces = []) {
   return sortie
 }
 
+/**
+ * Extrait un groupe exploitable de la colonne « Labels » de Google Contacts,
+ * qui ressemble à :
+ *   « essai saison 26-27 ::: école VILPY G3 ::: * myContacts »
+ * Reprise telle quelle, cette chaîne devenait le nom du groupe et rendait les
+ * filtres inutilisables. On cherche donc un repère de type G1, G2, G3 ; à
+ * défaut on prend le libellé le plus court une fois les mentions techniques
+ * de Google écartées.
+ */
+export function nettoyerLibelle(brut) {
+  const texte = String(brut || '').trim()
+  if (!texte) return ''
+
+  const segments = texte
+    .split(':::')
+    .map(s => s.trim())
+    .filter(s => s && !/^\*/.test(s) && !/mycontacts/i.test(s))
+
+  for (const s of [texte, ...segments]) {
+    const m = s.match(/\bG\s?(\d{1,2})\b/i)
+    if (m) return `G${m[1]}`
+  }
+
+  if (!segments.length) return texte
+  return segments.reduce((court, s) => (s.length < court.length ? s : court))
+}
+
 const EMAIL_VALIDE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
 
 /** Ne garde que les chiffres et le + initial. */
@@ -205,8 +253,8 @@ export function analyserCsv(contenu, elevesExistants = []) {
 
   const lignes = lignesBrutes.slice(1).map((brute, i) => {
     const champs = decouperLigne(brute, separateur)
-    const nom = valeur(champs, colonnes.nom)
-    const prenom = valeur(champs, colonnes.prenom)
+    const nom = nettoyerNom(valeur(champs, colonnes.nom))
+    const prenom = nettoyerNom(valeur(champs, colonnes.prenom))
     const email = valeur(champs, colonnes.email)
     const tel = nettoyerTelephone(valeur(champs, colonnes.telephone))
     const tel2 = nettoyerTelephone(valeur(champs, colonnes.telephone2))
@@ -234,7 +282,7 @@ export function analyserCsv(contenu, elevesExistants = []) {
     if (tel) telephones.push({ numero: tel, libelle: '', actifSMS: true })
     if (tel2) telephones.push({ numero: tel2, libelle: '', actifSMS: true })
 
-    const libelle = valeur(champs, colonnes.libelle)
+    const libelle = nettoyerLibelle(valeur(champs, colonnes.libelle))
     const licence = valeur(champs, colonnes.licence)
 
     // Ce que le fichier apporterait à une fiche déjà présente
@@ -262,6 +310,11 @@ export function analyserCsv(contenu, elevesExistants = []) {
         (!doublon || (Boolean(existant) && apports.complements.length > 0))
     }
   })
+
+  // Aperçu trié comme la liste des membres, pour s'y retrouver
+  lignes.sort((a, b) =>
+    norm(a.nom).localeCompare(norm(b.nom)) || norm(a.prenom).localeCompare(norm(b.prenom))
+  )
 
   return { enTetes, colonnes, lignes, erreur: null, separateur }
 }

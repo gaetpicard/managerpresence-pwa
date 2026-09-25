@@ -15,6 +15,7 @@ function Layout({ children, title }) {
     { path: '/cadres', icon: '👔', label: termes?.cadres || 'Cadres' },
     { path: '/exports', icon: '📤', label: 'Exports' },
     { path: '/forum', icon: '💬', label: 'Forum' },
+    { path: '/documents', icon: '📄', label: 'Documents' },
     { path: '/audit', icon: '📋', label: 'Audit' },
     { path: '/parametres', icon: '⚙️', label: 'Paramètres' },
   ]

@@ -18,6 +18,10 @@ function ParametresPage() {
   // Section active
   const [activeSection, setActiveSection] = useState('general')
   const [saving, setSaving] = useState(false)
+  // Niveaux / passeports
+  const [niveaux, setNiveaux] = useState([])
+  const [niveauxSupprimes, setNiveauxSupprimes] = useState([])
+  const [savingNiveaux, setSavingNiveaux] = useState(false)
   
   // Config générale
   const [clubConfig, setClubConfig] = useState({ nom: '', creeLe: '' })
@@ -82,6 +86,66 @@ function ParametresPage() {
 
   useEffect(() => { loadConfig() }, [])
 
+  // ── Niveaux / passeports ──
+  // Les modifications restent locales jusqu'à « Enregistrer » : on évite
+  // d'écrire dans la base à chaque frappe dans un champ de texte.
+  const ajouterNiveau = () => {
+    setNiveaux(prev => [...prev, {
+      id: `nouveau-${Date.now()}`,
+      nom: '',
+      couleur: '#cccccc',
+      ordre: prev.length,
+      inedit: true
+    }])
+  }
+
+  const modifierNiveau = (id, champs) => {
+    setNiveaux(prev => prev.map(n => n.id === id ? { ...n, ...champs } : n))
+  }
+
+  const deplacerNiveau = (index, sens) => {
+    setNiveaux(prev => {
+      const copie = [...prev]
+      const cible = index + sens
+      if (cible < 0 || cible >= copie.length) return prev
+      ;[copie[index], copie[cible]] = [copie[cible], copie[index]]
+      return copie.map((n, i) => ({ ...n, ordre: i }))
+    })
+  }
+
+  const supprimerNiveau = (niveau) => {
+    const attribue = !niveau.inedit
+    if (attribue && !confirm(
+      `Supprimer « ${niveau.nom || 'ce niveau'} » ? Il sera aussi retiré des membres qui le portent.`
+    )) return
+    setNiveaux(prev => prev.filter(n => n.id !== niveau.id).map((n, i) => ({ ...n, ordre: i })))
+    if (!niveau.inedit) setNiveauxSupprimes(prev => [...prev, niveau.id])
+  }
+
+  const enregistrerNiveaux = async () => {
+    if (niveaux.some(n => !n.nom.trim())) {
+      showToast('Chaque niveau doit avoir un nom', 'error')
+      return
+    }
+    setSavingNiveaux(true)
+    try {
+      await Promise.all(niveauxSupprimes.map(id => FirebaseService.supprimerNiveau(id)))
+      await Promise.all(niveaux.map((n, i) => FirebaseService.enregistrerNiveau({
+        id: n.inedit ? null : n.id,
+        nom: n.nom.trim(),
+        couleur: n.couleur,
+        ordre: i
+      })))
+      setNiveauxSupprimes([])
+      setNiveaux(await FirebaseService.getNiveaux())
+      showToast('Niveaux enregistrés', 'success')
+    } catch (error) {
+      console.error('Erreur niveaux:', error)
+      showToast("Erreur lors de l'enregistrement des niveaux", 'error')
+    }
+    setSavingNiveaux(false)
+  }
+
   const showToast = (message, type = 'info') => {
     setToast({ message, type })
     setTimeout(() => setToast(null), 3000)
@@ -117,6 +181,7 @@ function ParametresPage() {
         if (notifData) { setCurrentNotifEmail(notifData); setNotifEmail(notifData) }
         if (smsData) setSmsConfig(smsData)
         if (periodesData) setPeriodes(periodesData)
+        setNiveaux(await FirebaseService.getNiveaux())
         if (msgData) setMessageAbsence(msgData)
         if (rappelData !== null) setRappelAppelActive(rappelData)
         if (backupsData) setBackups(backupsData)
@@ -581,6 +646,89 @@ node index.js
             <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '12px' }}>
               L'export par email avec découpage par périodes est disponible depuis l'application Android.
             </p>
+          </div>
+
+          {/* Niveaux / passeports — mêmes données que l'application */}
+          <div className="card">
+            <h3>🎨 {termes?.niveau || 'Niveaux'} / passeports</h3>
+            <p style={{ color: 'var(--text-muted)', fontSize: '12px' }}>
+              Les couleurs attribuées aux membres. L'ordre va du plus débutant au
+              plus avancé : c'est le plus avancé qui s'affiche sur la fiche.
+            </p>
+
+            <div style={{ marginTop: '12px' }}>
+              {niveaux.length === 0 && (
+                <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
+                  Aucun niveau défini pour l'instant.
+                </p>
+              )}
+
+              {niveaux.map((n, index) => (
+                <div
+                  key={n.id}
+                  style={{
+                    display: 'flex', flexWrap: 'wrap', gap: '8px',
+                    alignItems: 'center', marginBottom: '8px'
+                  }}
+                >
+                  <input
+                    type="color"
+                    value={n.couleur}
+                    onChange={(e) => modifierNiveau(n.id, { couleur: e.target.value })}
+                    title="Couleur du passeport"
+                    style={{
+                      width: '42px', height: '34px', padding: 0, cursor: 'pointer',
+                      border: '1px solid rgba(255,255,255,0.25)', borderRadius: '6px',
+                      background: 'transparent'
+                    }}
+                  />
+                  <input
+                    type="text"
+                    className="form-input"
+                    style={{ flex: '1 1 140px' }}
+                    placeholder="Blanc, Jaune, Orange…"
+                    value={n.nom}
+                    onChange={(e) => modifierNiveau(n.id, { nom: e.target.value })}
+                  />
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    disabled={index === 0}
+                    onClick={() => deplacerNiveau(index, -1)}
+                    title="Monter"
+                  >
+                    ↑
+                  </button>
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    disabled={index === niveaux.length - 1}
+                    onClick={() => deplacerNiveau(index, 1)}
+                    title="Descendre"
+                  >
+                    ↓
+                  </button>
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => supprimerNiveau(n)}
+                    title="Supprimer"
+                  >
+                    🗑️
+                  </button>
+                </div>
+              ))}
+
+              <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+                <button className="btn btn-secondary btn-sm" onClick={ajouterNiveau}>
+                  ➕ Ajouter un niveau
+                </button>
+                <button
+                  className="btn btn-primary btn-sm"
+                  onClick={enregistrerNiveaux}
+                  disabled={savingNiveaux}
+                >
+                  {savingNiveaux ? 'Enregistrement…' : 'Enregistrer les niveaux'}
+                </button>
+              </div>
+            </div>
           </div>
 
           {/* Périodes scolaires */}

@@ -4,7 +4,39 @@ import { useApp } from '../App'
 import { FirebaseService } from '../services/FirebaseService'
 
 function DashboardPage() {
-  const { licence, clubName, termes } = useApp()
+  const { licence, clubName, termes, projectId } = useApp()
+  const [portailEnCours, setPortailEnCours] = useState(false)
+  const [messageLicence, setMessageLicence] = useState(null)
+
+  /**
+   * Ouvre le portail Stripe pour gérer l'abonnement (carte, résiliation…).
+   * Aucune donnée bancaire ne transite par la PWA : le serveur crée une
+   * session et renvoie une adresse à ouvrir.
+   */
+  const ouvrirPortailAbonnement = async () => {
+    setPortailEnCours(true)
+    setMessageLicence(null)
+    try {
+      const reponse = await fetch('https://managerpresence-server.onrender.com/stripe/portal', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectId })
+      })
+      const data = await reponse.json()
+      if (data.url) {
+        window.open(data.url, '_blank', 'noopener')
+      } else {
+        // Cas courant : club en période d'essai, sans abonnement Stripe
+        setMessageLicence(data.error === 'Aucun abonnement Stripe associé'
+          ? "Aucun abonnement en cours — passez par l'application pour souscrire."
+          : (data.error || "Le portail n'a pas pu être ouvert."))
+      }
+    } catch (error) {
+      console.error('Erreur portail abonnement:', error)
+      setMessageLicence('Serveur injoignable. Réessayez dans un instant.')
+    }
+    setPortailEnCours(false)
+  }
   const [stats, setStats] = useState({
     totalMembres: 0,
     totalCreneaux: 0,
@@ -157,6 +189,23 @@ function DashboardPage() {
             </div>
           </div>
         )}
+
+        {/* Gestion de l'abonnement — le serveur détient la clé Stripe,
+            la PWA ne fait que demander l'ouverture du portail. */}
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '16px' }}>
+          <button
+            className="btn btn-secondary btn-sm"
+            disabled={portailEnCours}
+            onClick={ouvrirPortailAbonnement}
+          >
+            {portailEnCours ? 'Ouverture…' : '💳 Gérer mon abonnement'}
+          </button>
+          {messageLicence && (
+            <span style={{ fontSize: '13px', color: 'var(--text-muted)', alignSelf: 'center' }}>
+              {messageLicence}
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Actions rapides */}

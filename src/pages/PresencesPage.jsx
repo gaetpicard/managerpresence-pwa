@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import Layout from '../components/Layout'
 import { FirebaseService } from '../services/FirebaseService'
+import { moisDebutSaison, cleTri } from '../services/CalendrierScolaire'
 import { useApp } from '../App'
 
 function PresencesPage() {
@@ -37,15 +38,12 @@ function PresencesPage() {
         setCreneaux(creneauxData)
         
         // Trier les séances par date
-        const sorted = seancesData.sort((a, b) => {
-          const parseDate = (d) => {
-            if (!d) return 0
-            const parts = d.split('/')
-            if (parts.length !== 2) return 0
-            return parseInt(parts[1]) * 100 + parseInt(parts[0])
-          }
-          return parseDate(a.date) - parseDate(b.date)
-        })
+        // Les dates sont en « JJ/MM » : l'ordre dépend du mois d'ouverture
+        // de la saison, sans quoi janvier passerait avant septembre.
+        const debutSaison = moisDebutSaison(seancesData.map(s => s.date))
+        const sorted = [...seancesData].sort(
+          (a, b) => cleTri(a.date, debutSaison) - cleTri(b.date, debutSaison)
+        )
         setSeances(sorted)
       }
     } catch (error) {

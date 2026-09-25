@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react'
 import Layout from '../components/Layout'
 import { FirebaseService } from '../services/FirebaseService'
+import { useApp } from '../App'
 
 function CadresPage() {
+  const { projectId } = useApp()
   const [cadres, setCadres] = useState([])
   const [isLoading, setIsLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState('')
@@ -11,6 +13,10 @@ function CadresPage() {
   const [formData, setFormData] = useState({ nom: '', role: 'UTILISATEUR' })
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState(null)
+  // Invitations : la PWA ne définit pas de mot de passe (voir FirebaseService)
+  const [invitations, setInvitations] = useState([])
+  const [codeGenere, setCodeGenere] = useState(null)
+  const [generationEnCours, setGenerationEnCours] = useState(false)
 
   useEffect(() => {
     loadCadres()
@@ -20,14 +26,44 @@ function CadresPage() {
     setIsLoading(true)
     try {
       if (FirebaseService.isInitialized()) {
-        const data = await FirebaseService.getCadres()
+        const [data, invits] = await Promise.all([
+          FirebaseService.getCadres(),
+          FirebaseService.getInvitations()
+        ])
         setCadres(data)
+        setInvitations(invits)
       }
     } catch (error) {
       console.error('Erreur chargement:', error)
       showToast('Erreur lors du chargement', 'error')
     }
     setIsLoading(false)
+  }
+
+  // ── Invitations ──
+  const genererInvitation = async () => {
+    setGenerationEnCours(true)
+    try {
+      const code = await FirebaseService.creerInvitation(projectId, '')
+      setCodeGenere(code)
+      setInvitations(await FirebaseService.getInvitations())
+    } catch (error) {
+      console.error('Erreur invitation:', error)
+      showToast("Impossible de générer le code", 'error')
+    }
+    setGenerationEnCours(false)
+  }
+
+  const revoquer = async (invitation) => {
+    if (!confirm(`Révoquer le code ${invitation.code} ?`)) return
+    try {
+      await FirebaseService.revoquerInvitation(invitation.code)
+      setInvitations(await FirebaseService.getInvitations())
+      showToast('Code révoqué', 'success')
+    } catch (error) {
+      console.error('Erreur révocation:', error)
+      showToast('Erreur lors de la révocation', 'error')
+    }
   }
 
   const showToast = (message, type = 'info') => {
@@ -138,11 +174,64 @@ function CadresPage() {
           <button className="btn btn-secondary btn-sm" onClick={loadCadres}>
             🔄 Actualiser
           </button>
+          <button className="btn btn-secondary btn-sm" onClick={genererInvitation}
+                  disabled={generationEnCours}>
+            {generationEnCours ? '…' : '🎟️ Inviter un cadre'}
+          </button>
           <button className="btn btn-primary btn-sm" onClick={openAddModal}>
             ➕ Ajouter
           </button>
         </div>
       </div>
+
+      {/* Code d'invitation fraîchement créé */}
+      {codeGenere && (
+        <div className="card" style={{ marginBottom: 'var(--spacing-md)' }}>
+          <h3>🎟️ Code d'invitation</h3>
+          <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
+            Transmettez ce code au futur cadre. Il l'utilisera depuis l'application
+            sur son téléphone pour créer son compte et choisir son mot de passe.
+          </p>
+          <div style={{
+            fontFamily: 'monospace', fontSize: '26px', letterSpacing: '3px',
+            textAlign: 'center', padding: '14px', margin: '10px 0',
+            background: 'var(--bg-input)', borderRadius: 'var(--radius-md)'
+          }}>
+            {codeGenere}
+          </div>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            <button className="btn btn-secondary btn-sm" onClick={() => {
+              navigator.clipboard?.writeText(codeGenere)
+              showToast('Code copié', 'success')
+            }}>
+              📋 Copier
+            </button>
+            <button className="btn btn-secondary btn-sm" onClick={() => setCodeGenere(null)}>
+              Fermer
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Invitations en attente */}
+      {invitations.filter(i => i.statut === 'actif').length > 0 && (
+        <div className="card" style={{ marginBottom: 'var(--spacing-md)' }}>
+          <h3>🎟️ Invitations en attente ({invitations.filter(i => i.statut === 'actif').length})</h3>
+          {invitations.filter(i => i.statut === 'actif').map(inv => (
+            <div key={inv.id} className="list-item">
+              <div className="list-item-content">
+                <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{inv.code}</span>
+                <span style={{ color: 'var(--text-muted)', fontSize: '13px' }}>
+                  {inv.cadreNom ? ` — ${inv.cadreNom}` : ' — pass vierge'}
+                </span>
+              </div>
+              <button className="btn btn-secondary btn-sm" onClick={() => revoquer(inv)}>
+                Révoquer
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Liste des cadres */}
       <div className="card" style={{ padding: 0 }}>

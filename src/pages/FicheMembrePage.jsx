@@ -3,10 +3,13 @@ import { useParams, useNavigate } from 'react-router-dom'
 import Layout from '../components/Layout'
 import { FirebaseService } from '../services/FirebaseService'
 import { lienMessagerie, ouvrirMessagerie } from '../services/Messagerie'
+import { useApp } from '../App'
+import { moisDebutSaison, dateReelle, cleTri } from '../services/CalendrierScolaire'
 
 function FicheMembrePage() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const { generatedBy } = useApp()
   
   const [membre, setMembre] = useState(null)
   const [creneaux, setCreneaux] = useState([])
@@ -19,9 +22,14 @@ function FicheMembrePage() {
   const [activeTab, setActiveTab] = useState('infos')
   // Adresse d'envoi du club (Paramètres > configuration email)
   const [expediteur, setExpediteur] = useState('')
+  // Notes sur ce membre
+  const [notes, setNotes] = useState([])
+  const [nouvelleNote, setNouvelleNote] = useState('')
+  const [enregistrementNote, setEnregistrementNote] = useState(false)
   const [periodeFilter, setPeriodeFilter] = useState('all')
   const [periodeDebut, setPeriodeDebut] = useState('')
   const [periodeFin, setPeriodeFin] = useState('')
+  const [periodesScolaires, setPeriodesScolaires] = useState([])
 
   useEffect(() => {
     loadData()
@@ -36,13 +44,17 @@ function FicheMembrePage() {
     setIsLoading(true)
     try {
       if (FirebaseService.isInitialized()) {
-        const [elevesData, creneauxData, presencesData, configEmail] = await Promise.all([
+        const [elevesData, creneauxData, presencesData, configEmail, notesData, periodesData] = await Promise.all([
           FirebaseService.getEleves(),
           FirebaseService.getCreneaux(),
           FirebaseService.getAllPresences(),
-          FirebaseService.getEmailConfig()
+          FirebaseService.getEmailConfig(),
+          FirebaseService.getNotes(),
+          FirebaseService.getPeriodes()
         ])
         setExpediteur(configEmail?.emailFrom || '')
+        setNotes(notesData.filter(n => n.eleveId === id))
+        setPeriodesScolaires(periodesData || [])
         
         const membreData = elevesData.find(e => e.id === id)
         if (!membreData) {
@@ -72,23 +84,44 @@ function FicheMembrePage() {
   // CALCUL DES STATISTIQUES
   // ========================================
 
+  // Les dates sont en « JJ/MM » : impossible de les comparer directement.
+  // On reconstitue l'année à partir du mois d'ouverture de la saison.
+  const debutSaison = moisDebutSaison(presences.map(p => p.date))
+
   const getFilteredPresences = () => {
     let filtered = [...presences]
     const now = new Date()
-    
+    const reelle = (d) => dateReelle(d, debutSaison, now)
+
     if (periodeFilter === 'week') {
-      const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
-      filtered = filtered.filter(p => new Date(p.date) >= weekAgo)
+      const limite = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
+      filtered = filtered.filter(p => { const d = reelle(p.date); return d && d >= limite })
     } else if (periodeFilter === 'month') {
-      const monthAgo = new Date(now.getFullYear(), now.getMonth() - 1, now.getDate())
-      filtered = filtered.filter(p => new Date(p.date) >= monthAgo)
+      const limite = new Date(now.getFullYear(), now.getMonth() - 1, now.getDate())
+      filtered = filtered.filter(p => { const d = reelle(p.date); return d && d >= limite })
     } else if (periodeFilter === 'year') {
-      const yearAgo = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate())
-      filtered = filtered.filter(p => new Date(p.date) >= yearAgo)
+      const limite = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate())
+      filtered = filtered.filter(p => { const d = reelle(p.date); return d && d >= limite })
+    } else if (periodeFilter.startsWith('scolaire:')) {
+      // Période scolaire du club, bornes « JJ/MM » comprises
+      const periode = periodesScolaires.find(pe => pe.id === periodeFilter.slice(9))
+      if (periode) {
+        const debut = cleTri(periode.debut, debutSaison)
+        const fin = cleTri(periode.fin, debutSaison)
+        filtered = filtered.filter(p => {
+          const k = cleTri(p.date, debutSaison)
+          return k >= debut && k <= fin
+        })
+      }
     } else if (periodeFilter === 'custom' && periodeDebut && periodeFin) {
-      filtered = filtered.filter(p => p.date >= periodeDebut && p.date <= periodeFin)
+      const debut = new Date(periodeDebut)
+      const fin = new Date(periodeFin)
+      filtered = filtered.filter(p => {
+        const d = reelle(p.date)
+        return d && d >= debut && d <= fin
+      })
     }
-    
+
     return filtered
   }
 
@@ -171,6 +204,50 @@ function FicheMembrePage() {
       corps: `Bonjour ${membre.prenom},\n\n`,
       expediteur
     })
+  }
+
+  // ── Notes ──
+  const rechargerNotes = async () => {
+    const toutes = await FirebaseService.getNotes()
+    setNotes(toutes.filter(n => n.eleveId === id))
+  }
+
+  const ajouterNote = async () => {
+    const texte = nouvelleNote.trim()
+    if (!texte) return
+    setEnregistrementNote(true)
+    try {
+      await FirebaseService.ajouterNote({ eleveId: id, texte, auteur: generatedBy || 'PWA' })
+      setNouvelleNote('')
+      await rechargerNotes()
+      showToast('Note ajoutée', 'success')
+    } catch (error) {
+      console.error('Erreur note:', error)
+      showToast("Impossible d'enregistrer la note", 'error')
+    }
+    setEnregistrementNote(false)
+  }
+
+  const basculerNoteTraitee = async (note) => {
+    try {
+      await FirebaseService.marquerNoteTraitee(note.id, !note.traite)
+      await rechargerNotes()
+    } catch (error) {
+      console.error('Erreur note:', error)
+      showToast('Erreur lors de la mise à jour', 'error')
+    }
+  }
+
+  const supprimerNote = async (note) => {
+    if (!confirm('Supprimer cette note ?')) return
+    try {
+      await FirebaseService.supprimerNote(note.id)
+      await rechargerNotes()
+      showToast('Note supprimée', 'success')
+    } catch (error) {
+      console.error('Erreur note:', error)
+      showToast('Erreur lors de la suppression', 'error')
+    }
   }
 
   const exportPresences = () => {
@@ -367,13 +444,93 @@ function FicheMembrePage() {
         >
           ✅ Historique ({presences.length})
         </button>
-        <button 
+        <button
           className={`tab ${activeTab === 'stats' ? 'active' : ''}`}
           onClick={() => setActiveTab('stats')}
         >
           📊 Statistiques
         </button>
+        <button
+          className={`tab ${activeTab === 'notes' ? 'active' : ''}`}
+          onClick={() => setActiveTab('notes')}
+        >
+          📝 Notes ({notes.filter(n => !n.traite).length}/{notes.length})
+        </button>
       </div>
+
+      {/* Onglet Notes — mêmes données que l'application (collection `notes`) */}
+      {activeTab === 'notes' && (
+        <div className="card">
+          <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+            <textarea
+              className="form-input"
+              placeholder="Écrire une note sur ce membre…"
+              rows={2}
+              style={{ flex: 1, resize: 'vertical' }}
+              value={nouvelleNote}
+              onChange={(e) => setNouvelleNote(e.target.value)}
+            />
+            <button
+              className="btn btn-primary"
+              disabled={!nouvelleNote.trim() || enregistrementNote}
+              onClick={ajouterNote}
+              style={{ alignSelf: 'flex-end' }}
+            >
+              {enregistrementNote ? '…' : 'Ajouter'}
+            </button>
+          </div>
+
+          {notes.length === 0 ? (
+            <div className="empty-state">
+              <div className="empty-state-icon">📝</div>
+              <div className="empty-state-title">Aucune note</div>
+              <div className="empty-state-desc">
+                Les notes servent à signaler ce qui doit être suivi : blessure,
+                matériel prêté, autorisation en attente…
+              </div>
+            </div>
+          ) : (
+            notes.map(note => (
+              <div
+                key={note.id}
+                className="list-item"
+                style={{ alignItems: 'flex-start', opacity: note.traite ? 0.55 : 1 }}
+              >
+                <input
+                  type="checkbox"
+                  title={note.traite ? 'Marquer comme à traiter' : 'Marquer comme traitée'}
+                  checked={Boolean(note.traite)}
+                  onChange={() => basculerNoteTraitee(note)}
+                  style={{ marginTop: '4px' }}
+                />
+                <div className="list-item-content" style={{ minWidth: 0 }}>
+                  <p style={{
+                    whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                    textDecoration: note.traite ? 'line-through' : 'none'
+                  }}>
+                    {note.texte}
+                  </p>
+                  <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                    {note.auteur || 'Anonyme'}
+                    {note.timestamp ? ` · ${new Date(note.timestamp).toLocaleDateString('fr-FR', {
+                      day: 'numeric', month: 'short', year: 'numeric',
+                      hour: '2-digit', minute: '2-digit'
+                    })}` : ''}
+                  </div>
+                </div>
+                <button
+                  className="btn btn-icon"
+                  onClick={() => supprimerNote(note)}
+                  style={{ opacity: 0.5, background: 'transparent' }}
+                  title="Supprimer"
+                >
+                  🗑️
+                </button>
+              </div>
+            ))
+          )}
+        </div>
+      )}
 
       {/* Tab Informations */}
       {activeTab === 'infos' && (
@@ -531,6 +688,15 @@ function FicheMembrePage() {
                 <option value="week">7 derniers jours</option>
                 <option value="month">30 derniers jours</option>
                 <option value="year">12 derniers mois</option>
+                {periodesScolaires.length > 0 && (
+                  <optgroup label="Périodes du club">
+                    {periodesScolaires.map(pe => (
+                      <option key={pe.id} value={`scolaire:${pe.id}`}>
+                        {pe.nom || `${pe.debut} → ${pe.fin}`}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
                 <option value="custom">Période personnalisée</option>
               </select>
             </div>

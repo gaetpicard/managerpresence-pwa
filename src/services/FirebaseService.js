@@ -6,6 +6,7 @@
 import { initializeApp, deleteApp, getApps } from 'firebase/app'
 import { getFirestore, collection, getDocs, doc, getDoc, setDoc, updateDoc, deleteDoc, query, where, orderBy } from 'firebase/firestore'
 import { getAuth, signInAnonymously, signOut } from 'firebase/auth'
+import { genererDates } from './CalendrierScolaire'
 
 let app = null
 let db = null
@@ -200,6 +201,207 @@ export const FirebaseService = {
       console.error('Erreur getNiveaux:', error)
       return []
     }
+  },
+
+  /** Crée ou met à jour un niveau. `couleur` au format CSS #RRGGBB. */
+  async enregistrerNiveau(niveau) {
+    if (!db) throw new Error('Firebase non initialisé')
+    // L'application stocke la couleur en ARGB (entier) : on remet l'opacité
+    const rvb = parseInt(String(niveau.couleur || '#cccccc').replace('#', ''), 16) || 0xCCCCCC
+    const argb = (0xFF000000 | rvb) >>> 0
+
+    const donnees = {
+      nom: niveau.nom || '',
+      couleur: argb,
+      ordre: Number(niveau.ordre ?? 0)
+    }
+    const ref = niveau.id
+      ? doc(db, 'niveaux', niveau.id)
+      : doc(collection(db, 'niveaux'))
+    await setDoc(ref, donnees, { merge: true })
+    return ref.id
+  },
+
+  /** Supprime un niveau et le retire des membres qui le portaient. */
+  async supprimerNiveau(id) {
+    if (!db) throw new Error('Firebase non initialisé')
+    await deleteDoc(doc(db, 'niveaux', id))
+
+    const eleves = await getDocs(collection(db, 'eleves'))
+    await Promise.all(eleves.docs
+      .filter(d => (d.data().niveauIds || []).includes(id))
+      .map(d => updateDoc(doc(db, 'eleves', d.id), {
+        niveauIds: (d.data().niveauIds || []).filter(n => n !== id)
+      })))
+    await this.addAuditLog('DELETE_NIVEAU', id, 'Supprimé depuis la PWA')
+  },
+
+  // ========================================
+  // CALENDRIER SCOLAIRE
+  // ========================================
+  // Le cache est partagé avec l'application : si elle a déjà téléchargé
+  // l'année, la PWA la lit sans réseau, et inversement.
+
+  async getVacancesEnCache(zone, annee) {
+    if (!db) return null
+    try {
+      const snap = await getDoc(doc(db, 'config', 'calendrier_scolaire'))
+      if (!snap.exists()) return null
+      const brut = snap.data()[`${zone}_${annee}`]
+      if (!brut) return null
+      // L'application enregistre « J/M/AAAA » ; on repasse en objets
+      return JSON.parse(brut).map(p => {
+        const [jd, md, ad] = p.debut.split('/').map(Number)
+        const [jf, mf, af] = p.fin.split('/').map(Number)
+        return { nom: p.nom, debut: { jour: jd, mois: md, annee: ad }, fin: { jour: jf, mois: mf, annee: af } }
+      })
+    } catch (error) {
+      console.error('Erreur getVacancesEnCache:', error)
+      return null
+    }
+  },
+
+  async memoriserVacances(zone, annee, periodes) {
+    if (!db) return
+    try {
+      const brut = JSON.stringify(periodes.map(p => ({
+        nom: p.nom,
+        debut: `${p.debut.jour}/${p.debut.mois}/${p.debut.annee}`,
+        fin: `${p.fin.jour}/${p.fin.mois}/${p.fin.annee}`
+      })))
+      await setDoc(doc(db, 'config', 'calendrier_scolaire'), {
+        [`${zone}_${annee}`]: brut,
+        [`maj_${zone}_${annee}`]: Date.now()
+      }, { merge: true })
+    } catch (error) {
+      console.error('Erreur memoriserVacances:', error)
+    }
+  },
+
+  // ========================================
+  // NOTES SUR LES MEMBRES
+  // ========================================
+  // ⚠️ La collection vivante est `notes` (et non `notes_eleves`, qui
+  // n'apparaît que dans d'anciennes sauvegardes).
+
+  async getNotes() {
+    if (!db) return []
+    try {
+      const snapshot = await getDocs(collection(db, 'notes'))
+      return snapshot.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+    } catch (error) {
+      console.error('Erreur getNotes:', error)
+      return []
+    }
+  },
+
+  async ajouterNote({ eleveId, texte, auteur }) {
+    if (!db) throw new Error('Firebase non initialisé')
+    const ref = doc(collection(db, 'notes'))
+    await setDoc(ref, {
+      eleveId: eleveId || '',
+      texte: texte || '',
+      auteur: auteur || 'PWA',
+      timestamp: Date.now(),   // millisecondes, comme l'application
+      traite: false
+    })
+    return ref.id
+  },
+
+  async marquerNoteTraitee(id, traite) {
+    if (!db) throw new Error('Firebase non initialisé')
+    await updateDoc(doc(db, 'notes', id), { traite: Boolean(traite) })
+  },
+
+  async supprimerNote(id) {
+    if (!db) throw new Error('Firebase non initialisé')
+    await deleteDoc(doc(db, 'notes', id))
+  },
+
+  // ========================================
+  // DOCUMENTS
+  // ========================================
+
+  async getDocuments() {
+    if (!db) return []
+    try {
+      const snapshot = await getDocs(collection(db, 'documents'))
+      return snapshot.docs.map(d => ({ id: d.id, ...d.data() }))
+    } catch (error) {
+      console.error('Erreur getDocuments:', error)
+      return []
+    }
+  },
+
+  async enregistrerDocument(document) {
+    if (!db) throw new Error('Firebase non initialisé')
+    const ref = document.id
+      ? doc(db, 'documents', document.id)
+      : doc(collection(db, 'documents'))
+    await setDoc(ref, {
+      nom: document.nom || '',
+      description: document.description || '',
+      lienDrive: document.lienDrive || ''
+    }, { merge: true })
+    return ref.id
+  },
+
+  async supprimerDocument(id) {
+    if (!db) throw new Error('Firebase non initialisé')
+    await deleteDoc(doc(db, 'documents', id))
+    await this.addAuditLog('DELETE_DOCUMENT', id, 'Supprimé depuis la PWA')
+  },
+
+  // ========================================
+  // INVITATIONS DE CADRES
+  // ========================================
+  // La PWA ne définit pas de mot de passe : la clé de chiffrement de
+  // l'application devrait alors figurer dans le JavaScript public, ce qui
+  // permettrait de déchiffrer les mots de passe de tous les clubs. On génère
+  // donc un code d'invitation, et le cadre choisit son mot de passe lui-même
+  // depuis son téléphone.
+
+  async getInvitations() {
+    if (!db) return []
+    try {
+      const snapshot = await getDocs(collection(db, 'invitations'))
+      return snapshot.docs.map(d => ({ id: d.id, ...d.data() }))
+    } catch (error) {
+      console.error('Erreur getInvitations:', error)
+      return []
+    }
+  },
+
+  /** Génère un code d'invitation au format RACINE-XXXXXXXX, comme l'application. */
+  async creerInvitation(projectId, cadreNom = '') {
+    if (!db) throw new Error('Firebase non initialisé')
+    const racine = (projectId || '').replace(/-/g, '').slice(0, 4).toUpperCase() || 'CLUB'
+    const caracteres = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'   // sans I, O, 0, 1
+    const passId = Array.from({ length: 8 },
+      () => caracteres[Math.floor(Math.random() * caracteres.length)]).join('')
+    const code = `${racine}-${passId}`
+
+    await setDoc(doc(db, 'invitations', code), {
+      code,
+      racine,
+      passId,
+      structureId: projectId || '',
+      cadreNom,
+      uid: '',
+      statut: 'actif',
+      creeLe: new Date(),
+      utiliseeLe: null
+    })
+    await this.addAuditLog('CREATE_PASS', code, cadreNom || 'pass vierge')
+    return code
+  },
+
+  async revoquerInvitation(code) {
+    if (!db) throw new Error('Firebase non initialisé')
+    await updateDoc(doc(db, 'invitations', code), { statut: 'revoque' })
+    await this.addAuditLog('REVOKE_PASS', code, 'Révoqué depuis la PWA')
   },
 
   // ========================================
@@ -582,22 +784,25 @@ export const FirebaseService = {
    * @param joursSemaine Jours de la semaine (0=dimanche, 1=lundi, etc.)
    * @param creneauxIds IDs des créneaux à activer
    */
-  async generateSeances(startDate, endDate, joursSemaine, creneauxIds) {
+  async generateSeances(startDate, endDate, joursSemaine, creneauxIds, vacances = []) {
     if (!db) throw new Error('Firebase non initialisé')
-    
+
     const start = new Date(startDate)
     const end = new Date(endDate)
     const seancesCreees = []
-    
+
     // Récupérer les séances existantes pour éviter les doublons
     const existingSeances = await this.getSeances()
     const existingDates = new Set(existingSeances.map(s => s.date))
-    
+
+    // Les dates sont en « JJ/MM » : on s'appuie sur le module calendrier
+    const retenues = new Set(genererDates(start, end, joursSemaine, vacances))
+
     for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
       if (joursSemaine.includes(d.getDay())) {
         const dateStr = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`
-        
-        if (!existingDates.has(dateStr)) {
+
+        if (retenues.has(dateStr) && !existingDates.has(dateStr)) {
           const seance = {
             date: dateStr,
             creneauxActifsIds: creneauxIds,

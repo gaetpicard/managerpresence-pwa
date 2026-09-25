@@ -14,6 +14,7 @@ import ParametresPage from './pages/ParametresPage'
 import ExportPage from './pages/ExportPage'
 import ForumPage from './pages/ForumPage'
 import AuditPage from './pages/AuditPage'
+import DocumentsPage from './pages/DocumentsPage'
 
 // Services
 import { FirebaseService } from './services/FirebaseService'
@@ -236,6 +237,9 @@ function App() {
           } />
           <Route path="/forum" element={
             isConnected ? <ForumPage /> : <Navigate to="/login" />
+          } />
+          <Route path="/documents" element={
+            isConnected ? <DocumentsPage /> : <Navigate to="/login" />
           } />
           <Route path="/audit" element={
             isConnected ? <AuditPage /> : <Navigate to="/login" />

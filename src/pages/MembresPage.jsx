@@ -177,7 +177,7 @@ function MembresPage() {
       nom: '',
       prenom: '',
       groupe: '',
-      telephone: '',
+      telephones: [],
       email: '',
       creneauxIds: [],
       niveauIds: []
@@ -191,12 +191,34 @@ function MembresPage() {
       nom: eleve.nom || '',
       prenom: eleve.prenom || '',
       groupe: eleve.groupe || '',
-      telephone: eleve.telephone || eleve.tel || '',
+      telephones: Array.isArray(eleve.telephones) ? eleve.telephones.map(c => ({ ...c })) : [],
       email: eleve.email || '',
       creneauxIds: eleve.creneauxIds || [],
       niveauIds: eleve.niveauIds || []
     })
     setShowModal(true)
+  }
+
+  // ── Contacts téléphoniques ──
+  const ajouterContact = () => {
+    setFormData(prev => ({
+      ...prev,
+      telephones: [...(prev.telephones || []), { numero: '', libelle: '', actifSMS: true }]
+    }))
+  }
+
+  const modifierContact = (index, champs) => {
+    setFormData(prev => ({
+      ...prev,
+      telephones: (prev.telephones || []).map((c, i) => i === index ? { ...c, ...champs } : c)
+    }))
+  }
+
+  const retirerContact = (index) => {
+    setFormData(prev => ({
+      ...prev,
+      telephones: (prev.telephones || []).filter((_, i) => i !== index)
+    }))
   }
 
   const handleNiveauToggle = (niveauId) => {
@@ -950,15 +972,68 @@ function MembresPage() {
                     onChange={(e) => setFormData({ ...formData, groupe: e.target.value })}
                   />
                 </div>
-                <div className="form-group">
-                  <label className="form-label">Téléphone</label>
-                  <input
-                    type="tel"
-                    className="form-input"
-                    placeholder="06 12 34 56 78"
-                    value={formData.telephone}
-                    onChange={(e) => setFormData({ ...formData, telephone: e.target.value })}
-                  />
+              </div>
+
+              {/* Contacts téléphoniques — l'application en gère plusieurs,
+                  avec un libellé et un indicateur « reçoit les SMS ». */}
+              <div className="form-group">
+                <label className="form-label">Téléphones</label>
+                <div style={{
+                  padding: '12px', background: 'var(--bg-input)',
+                  borderRadius: 'var(--radius-md)'
+                }}>
+                  {(formData.telephones || []).length === 0 && (
+                    <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: '0 0 8px' }}>
+                      Aucun numéro enregistré.
+                    </p>
+                  )}
+
+                  {(formData.telephones || []).map((contact, i) => (
+                    <div key={i} style={{
+                      display: 'flex', flexWrap: 'wrap', gap: '8px',
+                      alignItems: 'center', marginBottom: '8px'
+                    }}>
+                      <input
+                        type="tel"
+                        className="form-input"
+                        style={{ flex: '1 1 150px' }}
+                        placeholder="06 12 34 56 78"
+                        value={contact.numero || ''}
+                        onChange={(e) => modifierContact(i, { numero: e.target.value })}
+                      />
+                      <input
+                        type="text"
+                        className="form-input"
+                        style={{ flex: '1 1 110px' }}
+                        placeholder="Papa, Maman…"
+                        value={contact.libelle || ''}
+                        onChange={(e) => modifierContact(i, { libelle: e.target.value })}
+                      />
+                      <label
+                        title="Ce numéro reçoit les SMS d'absence"
+                        style={{ display: 'flex', alignItems: 'center', gap: '6px',
+                                 fontSize: '13px', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={contact.actifSMS !== false}
+                          onChange={(e) => modifierContact(i, { actifSMS: e.target.checked })}
+                        />
+                        SMS
+                      </label>
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => retirerContact(i)}
+                        title="Retirer ce numéro"
+                      >
+                        🗑️
+                      </button>
+                    </div>
+                  ))}
+
+                  <button className="btn btn-secondary btn-sm" onClick={ajouterContact}>
+                    ➕ Ajouter un numéro
+                  </button>
                 </div>
               </div>
 

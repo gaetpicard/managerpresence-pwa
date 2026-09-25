@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react'
 import Layout from '../components/Layout'
 import { FirebaseService } from '../services/FirebaseService'
+import { moisDebutSaison, cleTri } from '../services/CalendrierScolaire'
 import { useApp } from '../App'
+import { telechargerVacances, anneeScolaireCourante, anneesProposees, ACADEMIES } from '../services/CalendrierScolaire'
 
 function DatesPage() {
   const { termes } = useApp()
@@ -26,6 +28,13 @@ function DatesPage() {
     joursSemaine: [1, 2, 3, 4, 5], // Lundi à vendredi par défaut
     creneauxIds: []
   })
+  // Vacances scolaires
+  const [exclureVacances, setExclureVacances] = useState(true)
+  const [zone, setZone] = useState('A')
+  const [anneeScolaire, setAnneeScolaire] = useState(anneeScolaireCourante())
+  const [vacances, setVacances] = useState([])
+  const [sourceVacances, setSourceVacances] = useState(null)
+  const [chargementVacances, setChargementVacances] = useState(false)
   
   // Sélection multiple
   const [selectedSeances, setSelectedSeances] = useState(new Set())
@@ -54,15 +63,12 @@ function DatesPage() {
         ])
         
         // Trier par date
-        const sorted = seancesData.sort((a, b) => {
-          const parseDate = (d) => {
-            if (!d) return 0
-            const parts = d.split('/')
-            if (parts.length !== 2) return 0
-            return parseInt(parts[1]) * 100 + parseInt(parts[0])
-          }
-          return parseDate(a.date) - parseDate(b.date)
-        })
+        // Les dates sont en « JJ/MM » : l'ordre dépend du mois d'ouverture
+        // de la saison, sans quoi janvier passerait avant septembre.
+        const debutSaison = moisDebutSaison(seancesData.map(s => s.date))
+        const sorted = [...seancesData].sort(
+          (a, b) => cleTri(a.date, debutSaison) - cleTri(b.date, debutSaison)
+        )
         
         setSeances(sorted)
         setCreneaux(creneauxData)
@@ -171,6 +177,54 @@ function DatesPage() {
   // GÉNÉRATION AUTOMATIQUE
   // ========================================
 
+  /**
+   * Charge les vacances de la zone : d'abord la mémoire du club (partagée avec
+   * l'application), sinon le calendrier officiel, qu'on mémorise ensuite.
+   */
+  const chargerVacances = async (forcer = false) => {
+    if (!exclureVacances) { setVacances([]); setSourceVacances(null); return }
+    setChargementVacances(true)
+    try {
+      if (!forcer) {
+        const cache = await FirebaseService.getVacancesEnCache(zone, anneeScolaire)
+        if (cache && cache.length) {
+          setVacances(cache)
+          setSourceVacances('enregistre')
+          return
+        }
+      }
+      const officiel = await telechargerVacances(zone, anneeScolaire)
+      if (officiel && officiel.length) {
+        setVacances(officiel)
+        setSourceVacances('officiel')
+        FirebaseService.memoriserVacances(zone, anneeScolaire, officiel)
+      } else {
+        setVacances([])
+        setSourceVacances('aucune')
+      }
+    } catch (error) {
+      console.error('Erreur calendrier scolaire:', error)
+      setVacances([])
+      setSourceVacances('aucune')
+    } finally {
+      setChargementVacances(false)
+    }
+  }
+
+  useEffect(() => {
+    if (showAutoGenerate) chargerVacances()
+  }, [showAutoGenerate, zone, anneeScolaire, exclureVacances])
+
+  // Une année scolaire choisie propose naturellement septembre → juin
+  useEffect(() => {
+    const debut = Number(anneeScolaire.split('-')[0])
+    setAutoGenData(prev => ({
+      ...prev,
+      startDate: prev.startDate || `${debut}-09-01`,
+      endDate: prev.endDate || `${debut + 1}-06-30`
+    }))
+  }, [anneeScolaire])
+
   const handleAutoGenerate = async () => {
     if (!autoGenData.startDate || !autoGenData.endDate) {
       showToast('Les dates de début et fin sont obligatoires', 'error')
@@ -187,10 +241,16 @@ function DatesPage() {
         autoGenData.startDate,
         autoGenData.endDate,
         autoGenData.joursSemaine,
-        autoGenData.creneauxIds
+        autoGenData.creneauxIds,
+        exclureVacances ? vacances : []
       )
-      
-      showToast(`${created.length} date(s) créée(s)`, 'success')
+
+      showToast(
+        exclureVacances && vacances.length > 0
+          ? `${created.length} date(s) créée(s), vacances exclues`
+          : `${created.length} date(s) créée(s)`,
+        'success'
+      )
       setShowAutoGenerate(false)
       await loadData()
     } catch (error) {
@@ -612,6 +672,98 @@ function DatesPage() {
                     </button>
                   ))}
                 </div>
+              </div>
+
+              {/* Vacances scolaires — même source que l'application */}
+              <div className="form-group">
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={exclureVacances}
+                    onChange={(e) => setExclureVacances(e.target.checked)}
+                  />
+                  <span className="form-label" style={{ margin: 0 }}>
+                    Ne pas créer de date pendant les vacances scolaires
+                  </span>
+                </label>
+
+                {exclureVacances && (
+                  <div style={{
+                    marginTop: '10px', padding: '12px',
+                    background: 'var(--bg-input)', borderRadius: 'var(--radius-md)'
+                  }}>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'center' }}>
+                      <div>
+                        <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '4px' }}>
+                          ZONE
+                        </div>
+                        <div style={{ display: 'flex', gap: '6px' }}>
+                          {['A', 'B', 'C'].map(z => (
+                            <button
+                              key={z}
+                              className={`btn btn-sm ${zone === z ? 'btn-primary' : 'btn-secondary'}`}
+                              onClick={() => setZone(z)}
+                              title={ACADEMIES[z].join(', ')}
+                            >
+                              {z}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div>
+                        <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '4px' }}>
+                          ANNÉE SCOLAIRE
+                        </div>
+                        <select
+                          className="form-input form-select"
+                          style={{ width: '150px' }}
+                          value={anneeScolaire}
+                          onChange={(e) => setAnneeScolaire(e.target.value)}
+                        >
+                          {anneesProposees().map(a => <option key={a} value={a}>{a}</option>)}
+                        </select>
+                      </div>
+                    </div>
+
+                    <div style={{ fontSize: '12px', marginTop: '10px' }}>
+                      {chargementVacances && <span style={{ color: 'var(--text-muted)' }}>Recherche des vacances…</span>}
+
+                      {!chargementVacances && sourceVacances === 'aucune' && (
+                        <span style={{ color: 'var(--danger)' }}>
+                          ❌ Aucune date de vacances trouvée : les séances seraient créées SANS les exclure.
+                        </span>
+                      )}
+
+                      {!chargementVacances && vacances.length > 0 && (
+                        <>
+                          <span style={{ color: 'var(--success)' }}>
+                            ✅ {sourceVacances === 'officiel'
+                              ? 'Calendrier officiel récupéré'
+                              : 'Calendrier déjà enregistré pour le club'}
+                          </span>
+                          <div style={{ color: 'var(--text-muted)', marginTop: '4px' }}>
+                            {vacances.map(v =>
+                              `${v.nom} : ${v.debut.jour}/${v.debut.mois} → ${v.fin.jour}/${v.fin.mois}`
+                            ).join(' · ')}
+                          </div>
+                          <button
+                            className="btn btn-secondary btn-sm"
+                            style={{ marginTop: '8px' }}
+                            disabled={chargementVacances}
+                            onClick={() => chargerVacances(true)}
+                          >
+                            🔄 Mettre à jour le calendrier
+                          </button>
+                        </>
+                      )}
+
+                      <div style={{ color: 'var(--text-muted)', marginTop: '6px' }}>
+                        Zone {zone} : {ACADEMIES[zone].join(', ')}
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {creneaux.length > 0 && (
