@@ -71,11 +71,65 @@ export const FirebaseService = {
   /**
    * Récupère tous les élèves
    */
+  // ⚠️ L'application stocke les contacts dans `telephones` : une LISTE d'objets
+  // { numero, libelle, actifSMS }. Les champs `telephone` / `telephone2` ne sont
+  // que des raccourcis calculés, jamais enregistrés. Écrire une simple chaîne
+  // ici serait ignoré par l'application, et les SMS d'absence partiraient à
+  // l'ancien numéro. De même, la catégorie s'appelle `libelle`, pas `groupe`.
+
+  /** Ajoute les raccourcis `telephone` / `groupe` attendus par l'interface. */
+  _normaliserEleve(id, data) {
+    const contacts = Array.isArray(data.telephones) ? data.telephones : []
+    const actifs = contacts.filter(c => c && c.numero && c.actifSMS !== false)
+    const premier = actifs[0] || contacts.find(c => c && c.numero) || null
+
+    return {
+      ...data,
+      id,
+      telephones: contacts,
+      telephone: premier ? premier.numero : (data.telephone || ''),
+      groupe: data.libelle || data.groupe || '',
+      libelle: data.libelle || data.groupe || ''
+    }
+  },
+
+  /** Repasse au format de l'application avant écriture. */
+  _preparerEleve(data) {
+    const sortie = { ...data }
+
+    // La catégorie : l'application ne lit que `libelle`
+    sortie.libelle = data.libelle || data.groupe || ''
+    delete sortie.groupe
+
+    // Le téléphone saisi met à jour le premier contact, sans perdre les autres
+    const contacts = Array.isArray(data.telephones) ? [...data.telephones] : []
+    const saisi = (data.telephone || '').trim()
+    if (saisi) {
+      const i = contacts.findIndex(c => c && c.actifSMS !== false)
+      if (i >= 0) {
+        contacts[i] = { ...contacts[i], numero: saisi }
+      } else {
+        contacts.unshift({ numero: saisi, libelle: '', actifSMS: true })
+      }
+    }
+    sortie.telephones = contacts.map(c => ({
+      numero: c.numero || '',
+      libelle: c.libelle || '',
+      actifSMS: c.actifSMS !== false
+    })).filter(c => c.numero)
+
+    // Raccourcis et identifiant : jamais enregistrés dans le document
+    delete sortie.telephone
+    delete sortie.tel
+    delete sortie.id
+    return sortie
+  },
+
   async getEleves() {
     if (!db) return []
     try {
       const snapshot = await getDocs(collection(db, 'eleves'))
-      return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
+      return snapshot.docs.map(d => this._normaliserEleve(d.id, d.data()))
     } catch (error) {
       console.error('Erreur getEleves:', error)
       return []
@@ -88,7 +142,10 @@ export const FirebaseService = {
   async addEleve(eleve) {
     if (!db) throw new Error('Firebase non initialisé')
     const docRef = doc(collection(db, 'eleves'))
-    await setDoc(docRef, { ...eleve, createdAt: new Date().toISOString() })
+    await setDoc(docRef, {
+      prenom: '', nom: '', email: '', creneauxIds: [], niveauIds: [],
+      ...this._preparerEleve(eleve)
+    })
     return docRef.id
   },
 
@@ -97,7 +154,7 @@ export const FirebaseService = {
    */
   async updateEleve(id, data) {
     if (!db) throw new Error('Firebase non initialisé')
-    await updateDoc(doc(db, 'eleves', id), data)
+    await updateDoc(doc(db, 'eleves', id), this._preparerEleve(data))
   },
 
   /**
@@ -105,7 +162,12 @@ export const FirebaseService = {
    */
   async deleteEleve(id) {
     if (!db) throw new Error('Firebase non initialisé')
+    const avant = await getDoc(doc(db, 'eleves', id))
+    const nom = avant.exists()
+      ? `${avant.data().nom || ''} ${avant.data().prenom || ''}`.trim()
+      : id
     await deleteDoc(doc(db, 'eleves', id))
+    await this.addAuditLog('DELETE_ELEVE', nom, 'Supprimé depuis la PWA')
   },
 
   // ========================================
@@ -130,48 +192,64 @@ export const FirebaseService = {
   // PRÉSENCES
   // ========================================
 
+  // ⚠️ Il n'existe PAS de collection "presences".
+  // L'application Android stocke les pointages dans le champ `presences` du
+  // document `seances`, sous la clé "<eleveId>_<creneauId>". Tout doit passer
+  // par là, sans quoi les deux applications ne voient pas les mêmes données.
+
   /**
-   * Récupère les présences pour une date
+   * Pointages d'une date, mis à plat : [{ eleveId, creneauId, date, statut }]
    */
   async getPresences(date) {
-    if (!db) return []
-    try {
-      const q = query(collection(db, 'presences'), where('date', '==', date))
-      const snapshot = await getDocs(q)
-      return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
-    } catch (error) {
-      console.error('Erreur getPresences:', error)
-      return []
-    }
+    const seances = await this.getSeances()
+    const seance = seances.find(s => s.date === date)
+    return this._aplatirPresences(seance)
   },
 
   /**
-   * Enregistre une présence
+   * Tous les pointages de la saison, mis à plat (pour les stats et les exports)
    */
-  async setPresence(eleveId, date, creneauId, present) {
-    if (!db) throw new Error('Firebase non initialisé')
-    const docId = `${eleveId}_${date}_${creneauId}`
-    await setDoc(doc(db, 'presences', docId), {
-      eleveId,
-      date,
-      creneauId,
-      present,
-      updatedAt: new Date().toISOString()
+  async getAllPresences() {
+    const seances = await this.getSeances()
+    return seances.flatMap(seance => this._aplatirPresences(seance))
+  },
+
+  /** Transforme la map `presences` d'une séance en liste exploitable. */
+  _aplatirPresences(seance) {
+    if (!seance || !seance.presences) return []
+    return Object.entries(seance.presences).map(([cle, statut]) => {
+      const separateur = cle.lastIndexOf('_')
+      return {
+        id: `${seance.id}_${cle}`,
+        eleveId: separateur === -1 ? cle : cle.slice(0, separateur),
+        creneauId: separateur === -1 ? '' : cle.slice(separateur + 1),
+        date: seance.date,
+        statut,                          // PRESENT | ABSENT | EXCUSE
+        present: statut === 'PRESENT'
+      }
     })
   },
 
   /**
-   * Récupère toutes les présences (pour stats)
+   * Enregistre un pointage dans la séance du jour, comme le fait l'application.
+   * `statut` : 'PRESENT' | 'ABSENT' | 'EXCUSE' (VIDE efface le pointage).
    */
-  async getAllPresences() {
-    if (!db) return []
-    try {
-      const snapshot = await getDocs(collection(db, 'presences'))
-      return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
-    } catch (error) {
-      console.error('Erreur getAllPresences:', error)
-      return []
+  async setPresence(eleveId, date, creneauId, statut) {
+    if (!db) throw new Error('Firebase non initialisé')
+
+    const seances = await this.getSeances()
+    const seance = seances.find(s => s.date === date)
+    if (!seance) throw new Error(`Aucune séance au ${date}`)
+
+    const presences = { ...(seance.presences || {}) }
+    const cle = `${eleveId}_${creneauId}`
+    if (!statut || statut === 'VIDE') {
+      delete presences[cle]
+    } else {
+      presences[cle] = statut
     }
+
+    await updateDoc(doc(db, 'seances', seance.id), { presences })
   },
 
   // ========================================
@@ -198,7 +276,12 @@ export const FirebaseService = {
   async addCadre(cadre) {
     if (!db) throw new Error('Firebase non initialisé')
     const docRef = doc(collection(db, 'cadres'))
-    await setDoc(docRef, { ...cadre, createdAt: new Date().toISOString() })
+    // L'application attend aussi password / authEmail / authUid
+    await setDoc(docRef, {
+      nom: '', role: 'UTILISATEUR', password: '', authEmail: '', authUid: '',
+      ...cadre
+    })
+    await this.addAuditLog('CREATE_CADRE', cadre.nom || docRef.id, 'Créé depuis la PWA')
     return docRef.id
   },
 
@@ -216,6 +299,7 @@ export const FirebaseService = {
   async deleteCadre(id) {
     if (!db) throw new Error('Firebase non initialisé')
     await deleteDoc(doc(db, 'cadres', id))
+    await this.addAuditLog('DELETE_CADRE', id, 'Supprimé depuis la PWA')
   },
 
   // ========================================
@@ -255,37 +339,49 @@ export const FirebaseService = {
   /**
    * Récupère tous les messages du forum
    */
+  // ⚠️ L'application Android date les messages avec un champ `timestamp`
+  // (millisecondes). Trier sur `date` écartait silencieusement TOUS ses
+  // messages : une requête orderBy ignore les documents sans ce champ.
   async getForumMessages() {
     if (!db) return []
     try {
-      const q = query(collection(db, 'forum'), orderBy('date', 'desc'))
-      const snapshot = await getDocs(q)
-      return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
+      const snapshot = await getDocs(collection(db, 'forum'))
+      const messages = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
+      return messages.sort((a, b) => this._instantMessage(b) - this._instantMessage(a))
     } catch (error) {
       console.error('Erreur getForumMessages:', error)
-      // Fallback sans orderBy si l'index n'existe pas
-      try {
-        const snapshot = await getDocs(collection(db, 'forum'))
-        const messages = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
-        return messages.sort((a, b) => {
-          const dateA = a.date?.toDate?.() || new Date(a.date) || new Date(0)
-          const dateB = b.date?.toDate?.() || new Date(b.date) || new Date(0)
-          return dateB - dateA
-        })
-      } catch (e) {
-        console.error('Erreur fallback:', e)
-        return []
-      }
+      return []
     }
   },
 
+  /** Instant d'un message, quel que soit le champ utilisé pour le dater. */
+  _instantMessage(message) {
+    if (typeof message.timestamp === 'number') return message.timestamp
+    const brut = message.timestamp || message.date
+    if (!brut) return 0
+    const d = brut?.toDate?.() || new Date(brut)
+    const t = d.getTime()
+    return Number.isNaN(t) ? 0 : t
+  },
+
   /**
-   * Ajoute un message au forum
+   * Ajoute un message au forum, au format attendu par l'application.
    */
   async addForumMessage(message) {
     if (!db) throw new Error('Firebase non initialisé')
     const docRef = doc(collection(db, 'forum'))
-    await setDoc(docRef, { ...message, date: new Date() })
+    await setDoc(docRef, {
+      type: 'general',
+      eleveId: '',
+      titre: '',
+      contenu: '',
+      parentId: '',
+      lu: [],
+      traite: false,
+      editedBy: '',
+      ...message,
+      timestamp: Date.now()
+    })
     return docRef.id
   },
 
@@ -331,11 +427,35 @@ export const FirebaseService = {
   /**
    * Ajoute une entrée dans le log d'audit
    */
-  async addAuditLog(log) {
-    if (!db) throw new Error('Firebase non initialisé')
-    const docRef = doc(collection(db, 'audit_log'))
-    await setDoc(docRef, { ...log, timestamp: new Date() })
-    return docRef.id
+  // Nom affiché dans le journal, renseigné à la connexion par App.jsx
+  _auteurCourant: 'PWA',
+
+  setAuteurAudit(nom) {
+    this._auteurCourant = nom || 'PWA'
+  },
+
+  /**
+   * Journalise une action, au format lu par l'application
+   * (timestamp, action, auteurNom, auteurUid, cible, details).
+   * Ne fait jamais échouer l'action métier : on trace, on ne bloque pas.
+   */
+  async addAuditLog(action, cible = '', details = '') {
+    if (!db) return null
+    try {
+      const docRef = doc(collection(db, 'audit_log'))
+      await setDoc(docRef, {
+        timestamp: new Date(),
+        action,
+        auteurNom: `${this._auteurCourant} (PWA)`,
+        auteurUid: 'pwa',
+        cible,
+        details
+      })
+      return docRef.id
+    } catch (error) {
+      console.error('Erreur addAuditLog:', error)
+      return null
+    }
   },
 
   /**
@@ -417,7 +537,10 @@ export const FirebaseService = {
    */
   async deleteSeance(id) {
     if (!db) throw new Error('Firebase non initialisé')
+    const avant = await getDoc(doc(db, 'seances', id))
+    const date = avant.exists() ? (avant.data().date || id) : id
     await deleteDoc(doc(db, 'seances', id))
+    await this.addAuditLog('DELETE_SEANCE', date, 'Supprimée depuis la PWA')
   },
 
   /**
@@ -624,12 +747,21 @@ export const FirebaseService = {
   /**
    * Récupère les périodes scolaires
    */
+  // ⚠️ L'application utilise la COLLECTION `periodes_scolaires`, avec les champs
+  // `dateDebut` / `dateFin` (et non un document config/periodes avec debut/fin).
   async getPeriodes() {
     if (!db) return []
     try {
-      const docRef = doc(db, 'config', 'periodes')
-      const docSnap = await getDoc(docRef)
-      return docSnap.exists() ? (docSnap.data().list || []) : []
+      const snapshot = await getDocs(collection(db, 'periodes_scolaires'))
+      return snapshot.docs.map(d => {
+        const data = d.data()
+        return {
+          id: d.id,
+          nom: data.nom || '',
+          debut: data.dateDebut || '',
+          fin: data.dateFin || ''
+        }
+      })
     } catch (error) {
       console.error('Erreur getPeriodes:', error)
       return []
@@ -650,8 +782,27 @@ export const FirebaseService = {
    */
   async updatePeriodes(periodes) {
     if (!db) throw new Error('Firebase non initialisé')
-    const docRef = doc(db, 'config', 'periodes')
-    await setDoc(docRef, { list: periodes })
+
+    // La collection fait foi : on retire ce qui a disparu, on réécrit le reste.
+    const existants = await getDocs(collection(db, 'periodes_scolaires'))
+    const gardes = new Set(periodes.map(p => p.id).filter(Boolean))
+
+    await Promise.all(
+      existants.docs
+        .filter(d => !gardes.has(d.id))
+        .map(d => deleteDoc(doc(db, 'periodes_scolaires', d.id)))
+    )
+
+    await Promise.all(periodes.map(p => {
+      const ref = p.id
+        ? doc(db, 'periodes_scolaires', p.id)
+        : doc(collection(db, 'periodes_scolaires'))
+      return setDoc(ref, {
+        nom: p.nom || '',
+        dateDebut: p.debut || '',
+        dateFin: p.fin || ''
+      })
+    }))
   },
 
   /**
