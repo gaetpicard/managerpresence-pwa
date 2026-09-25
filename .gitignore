@@ -1,0 +1,14 @@
+# Dépendances (réinstallées par Netlify à chaque build)
+node_modules/
+
+# Résultat de build (reconstruit par Netlify)
+dist/
+
+# Journaux et fichiers locaux
+*.log
+npm-debug.log*
+.DS_Store
+.env
+.env.local
+.vscode/
+.idea/

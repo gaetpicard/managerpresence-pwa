@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react'
 import Layout from '../components/Layout'
 import { FirebaseService } from '../services/FirebaseService'
+import { useApp } from '../App'
 
 function CreneauxPage() {
+  const { t } = useApp()
   const [creneaux, setCreneaux] = useState([])
   const [isLoading, setIsLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)

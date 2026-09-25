@@ -4,7 +4,7 @@ import { FirebaseService } from '../services/FirebaseService'
 import { useApp } from '../App'
 
 function ParametresPage() {
-  const { termes, clubName } = useApp()
+  const { termes, clubName, t, lang, setLang, LANGUAGES } = useApp()
   const [isLoading, setIsLoading] = useState(true)
   const [toast, setToast] = useState(null)
   
@@ -139,22 +139,22 @@ function ParametresPage() {
     try {
       const hashHex = await hashPassword(suPassword)
       if (suConfig?.passwordHash === hashHex) {
-        setSuAuthenticated(true); setSuError(null); showToast('Accès autorisé', 'success')
-      } else { setSuError('Mot de passe incorrect') }
+        setSuAuthenticated(true); setSuError(null); showToast(t('settings_su_granted'), 'success')
+      } else { setSuError(t('settings_wrong_password')) }
     } catch (error) { setSuError('Erreur de vérification') }
   }
 
   const changeSuPassword = async () => {
-    if (newSuPassword.length < 4) { showToast('Minimum 4 caractères', 'error'); return }
-    if (newSuPassword !== confirmSuPassword) { showToast('Mots de passe différents', 'error'); return }
+    if (newSuPassword.length < 4) { showToast(t('settings_min_chars'), 'error'); return }
+    if (newSuPassword !== confirmSuPassword) { showToast(t('settings_passwords_differ'), 'error'); return }
     setSaving(true)
     try {
       const hashHex = await hashPassword(newSuPassword)
       await FirebaseService.updateSuperUserConfig({ passwordHash: hashHex, isFirstConnection: false, lastModified: Date.now() })
       setSuConfig(prev => ({ ...prev, passwordHash: hashHex, isFirstConnection: false }))
       setShowChangeSuPassword(false); setNewSuPassword(''); setConfirmSuPassword('')
-      showToast('Mot de passe SU modifié', 'success')
-    } catch (error) { showToast('Erreur', 'error') }
+      showToast(t('settings_password_changed'), 'success')
+    } catch (error) { showToast(t('error'), 'error') }
     setSaving(false)
   }
 
@@ -168,7 +168,7 @@ function ParametresPage() {
         const base64 = event.target.result.split(',')[1]
         await FirebaseService.updateLogo(base64)
         setLogoPreview(`data:image/png;base64,${base64}`)
-        showToast('Logo mis à jour', 'success')
+        showToast(t('settings_logo_updated'), 'success')
       } catch (error) { showToast('Erreur upload', 'error') }
       setSaving(false)
     }
@@ -177,36 +177,36 @@ function ParametresPage() {
 
   const deleteLogo = async () => {
     setSaving(true)
-    try { await FirebaseService.deleteLogo(); setLogoPreview(null); showToast('Logo supprimé', 'success') }
-    catch (error) { showToast('Erreur', 'error') }
+    try { await FirebaseService.deleteLogo(); setLogoPreview(null); showToast(t('settings_logo_deleted'), 'success') }
+    catch (error) { showToast(t('error'), 'error') }
     setSaving(false)
   }
 
   const saveServerUrl = async () => {
     setSaving(true)
     try { await FirebaseService.updateBackendConfig({ backendUrl: serverUrl.trim(), docEnabled }); showToast('Sauvegardé', 'success') }
-    catch (error) { showToast('Erreur', 'error') }
+    catch (error) { showToast(t('error'), 'error') }
     setSaving(false)
   }
 
   const saveTermes = async () => {
     setSaving(true)
     try { await FirebaseService.updateTermes(termesConfig); showToast('Termes sauvegardés', 'success') }
-    catch (error) { showToast('Erreur', 'error') }
+    catch (error) { showToast(t('error'), 'error') }
     setSaving(false)
   }
 
   const saveEmailConfig = async () => {
     setSaving(true)
     try { await FirebaseService.updateEmailConfig(emailConfig); showToast('Config email sauvegardée', 'success') }
-    catch (error) { showToast('Erreur', 'error') }
+    catch (error) { showToast(t('error'), 'error') }
     setSaving(false)
   }
 
   const saveNotifEmail = async () => {
     setSaving(true)
     try { await FirebaseService.updateNotificationEmail(notifEmail); setCurrentNotifEmail(notifEmail); showToast('Email mis à jour', 'success') }
-    catch (error) { showToast('Erreur', 'error') }
+    catch (error) { showToast(t('error'), 'error') }
     setSaving(false)
   }
 
@@ -214,21 +214,21 @@ function ParametresPage() {
     if (!newClubName.trim()) return
     setSaving(true)
     try { await FirebaseService.updateClubName(newClubName.trim()); setClubConfig(prev => ({ ...prev, nom: newClubName.trim() })); setEditingClubName(false); showToast('Nom mis à jour', 'success') }
-    catch (error) { showToast('Erreur', 'error') }
+    catch (error) { showToast(t('error'), 'error') }
     setSaving(false)
   }
 
   const saveRappelConfig = async () => {
     setSaving(true)
     try { await FirebaseService.updateRappelConfig(rappelAppelActive); showToast('Rappel configuré', 'success') }
-    catch (error) { showToast('Erreur', 'error') }
+    catch (error) { showToast(t('error'), 'error') }
     setSaving(false)
   }
 
   const saveMessageAbsence = async () => {
     setSaving(true)
     try { await FirebaseService.updateMessageAbsence(messageAbsence); showToast('Message sauvegardé', 'success') }
-    catch (error) { showToast('Erreur', 'error') }
+    catch (error) { showToast(t('error'), 'error') }
     setSaving(false)
   }
 
@@ -241,7 +241,7 @@ function ParametresPage() {
       setPeriodes(updated)
       setNewPeriode({ nom: '', debut: '', fin: '' })
       showToast('Période ajoutée', 'success')
-    } catch (error) { showToast('Erreur', 'error') }
+    } catch (error) { showToast(t('error'), 'error') }
     setSaving(false)
   }
 
@@ -252,7 +252,7 @@ function ParametresPage() {
       await FirebaseService.updatePeriodes(updated)
       setPeriodes(updated)
       showToast('Période supprimée', 'success')
-    } catch (error) { showToast('Erreur', 'error') }
+    } catch (error) { showToast(t('error'), 'error') }
     setSaving(false)
   }
 
@@ -347,6 +347,23 @@ function ParametresPage() {
       {/* ============ GÉNÉRAL ============ */}
       {activeSection === 'general' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          {/* Langue */}
+          <div className="card">
+            <h3>🌍 {t('settings_language')}</h3>
+            <p style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{t('settings_language_desc')}</p>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '12px' }}>
+              {LANGUAGES.map(l => (
+                <button
+                  key={l.code}
+                  className={`btn btn-sm ${lang === l.code ? 'btn-primary' : 'btn-secondary'}`}
+                  onClick={() => setLang(l.code)}
+                >
+                  {l.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
           {/* Logo */}
           <div className="card">
             <h3>🖼️ Logo de la structure</h3>

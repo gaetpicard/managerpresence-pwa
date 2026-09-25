@@ -18,6 +18,9 @@ import AuditPage from './pages/AuditPage'
 // Services
 import { FirebaseService } from './services/FirebaseService'
 
+// i18n
+import { t, getLang, setLang, LANGUAGES } from './i18n'
+
 // URL du serveur de licences
 const SERVER_URL = 'https://managerpresence-server.onrender.com'
 
@@ -36,6 +39,14 @@ function App() {
   const [clubName, setClubName] = useState('')
   const [generatedBy, setGeneratedBy] = useState('')
   const [error, setError] = useState('')
+  const [lang, setLangState] = useState(getLang())
+
+  // Réagir aux changements de langue
+  useEffect(() => {
+    const handler = () => setLangState(getLang())
+    window.addEventListener('mp_lang_changed', handler)
+    return () => window.removeEventListener('mp_lang_changed', handler)
+  }, [])
   
   // 🏷️ Termes personnalisables selon le type de structure
   const [termes, setTermes] = useState({
@@ -191,6 +202,10 @@ function App() {
     generatedBy,
     error,
     termes,
+    lang,
+    t,
+    setLang: (l) => { setLang(l); setLangState(l) },
+    LANGUAGES,
     connecterAvecCode,
     deconnecter,
     setError
@@ -254,7 +269,7 @@ function LoadingScreen() {
       <div className="loading-content">
         <div className="loading-logo">MP</div>
         <div className="loading-spinner"></div>
-        <p>Chargement...</p>
+        <p>{t('loading')}</p>
       </div>
     </div>
   )

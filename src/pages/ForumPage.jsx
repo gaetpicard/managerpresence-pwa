@@ -4,7 +4,7 @@ import { FirebaseService } from '../services/FirebaseService'
 import { useApp } from '../App'
 
 function ForumPage() {
-  const { generatedBy } = useApp()
+  const { t, generatedBy } = useApp()
   const [messages, setMessages] = useState([])
   const [isLoading, setIsLoading] = useState(true)
   const [newMessage, setNewMessage] = useState('')
@@ -81,8 +81,7 @@ function ForumPage() {
     try {
       await FirebaseService.addForumMessage({
         contenu: newMessage.trim(),
-        auteur: generatedBy || 'Anonyme',
-        date: new Date()
+        auteur: generatedBy || 'Anonyme'
       })
       setNewMessage('')
       showToast('Message envoyé', 'success')
@@ -191,7 +190,7 @@ function ForumPage() {
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
                     <span style={{ fontWeight: 600 }}>{message.auteur || 'Anonyme'}</span>
                     <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                      {formatDate(message.date)}
+                      {formatDate(message.timestamp ?? message.date)}
                     </span>
                   </div>
                   <p style={{ 

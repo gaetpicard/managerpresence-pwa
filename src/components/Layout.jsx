@@ -3,20 +3,19 @@ import { NavLink } from 'react-router-dom'
 import { useApp } from '../App'
 
 function Layout({ children, title }) {
-  const { clubName, licence, deconnecter, generatedBy, termes } = useApp()
+  const { clubName, licence, deconnecter, generatedBy, termes, t } = useApp()
 
-  // 🏷️ Navigation avec termes dynamiques
   const navItems = [
-    { path: '/', icon: '🏠', label: 'Tableau de bord' },
-    { path: '/presences', icon: '✅', label: 'Présences' },
-    { path: '/membres', icon: '👥', label: termes?.eleves || 'Membres' },
-    { path: '/creneaux', icon: '📅', label: termes?.creneaux || 'Créneaux' },
-    { path: '/dates', icon: '🗓️', label: termes?.seances || 'Dates' },
-    { path: '/cadres', icon: '👔', label: termes?.cadres || 'Cadres' },
-    { path: '/exports', icon: '📤', label: 'Exports' },
-    { path: '/forum', icon: '💬', label: 'Forum' },
-    { path: '/audit', icon: '📋', label: 'Audit' },
-    { path: '/parametres', icon: '⚙️', label: 'Paramètres' },
+    { path: '/', icon: '🏠', label: t('nav_dashboard') },
+    { path: '/presences', icon: '✅', label: t('nav_presences') },
+    { path: '/membres', icon: '👥', label: termes?.eleves || t('members_title') },
+    { path: '/creneaux', icon: '📅', label: termes?.creneaux || t('slots_title') },
+    { path: '/dates', icon: '🗓️', label: termes?.seances || t('dates_title') },
+    { path: '/cadres', icon: '👔', label: termes?.cadres || t('cadres_title') },
+    { path: '/exports', icon: '📤', label: t('nav_exports') },
+    { path: '/forum', icon: '💬', label: t('nav_forum') },
+    { path: '/audit', icon: '📋', label: t('nav_audit') },
+    { path: '/parametres', icon: '⚙️', label: t('nav_settings') },
   ]
 
   const getPlanBadgeClass = () => {
@@ -72,19 +71,19 @@ function Layout({ children, title }) {
           {licence && (
             <div className="licence-info">
               {licence.joursRestants > 0 ? (
-                <span>✅ {licence.joursRestants} jours restants</span>
+                <span>✅ {licence.joursRestants} {t('licence_expires')}</span>
               ) : (
-                <span style={{ color: 'var(--danger)' }}>❌ Licence expirée</span>
+                <span style={{ color: 'var(--danger)' }}>{t('licence_expired')}</span>
               )}
             </div>
           )}
           {generatedBy && (
             <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '12px', textAlign: 'center' }}>
-              Connecté par {generatedBy}
+              {t('connected_by')} {generatedBy}
             </div>
           )}
           <button className="btn btn-danger btn-block btn-sm" onClick={deconnecter}>
-            🚪 Déconnexion
+            {t('nav_logout')}
           </button>
         </div>
       </aside>
