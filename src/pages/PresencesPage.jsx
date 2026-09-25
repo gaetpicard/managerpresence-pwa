@@ -4,7 +4,7 @@ import { FirebaseService } from '../services/FirebaseService'
 import { useApp } from '../App'
 
 function PresencesPage() {
-  const { t, termes, clubName } = useApp()
+  const { termes, clubName } = useApp()
   const [eleves, setEleves] = useState([])
   const [creneaux, setCreneaux] = useState([])
   const [seances, setSeances] = useState([])

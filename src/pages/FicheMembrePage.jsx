@@ -2,10 +2,8 @@ import React, { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import Layout from '../components/Layout'
 import { FirebaseService } from '../services/FirebaseService'
-import { useApp } from '../App'
 
 function FicheMembrePage() {
-  const { t } = useApp()
   const { id } = useParams()
   const navigate = useNavigate()
   

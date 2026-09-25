@@ -1,10 +1,8 @@
 import React, { useState, useEffect } from 'react'
 import Layout from '../components/Layout'
 import { FirebaseService } from '../services/FirebaseService'
-import { useApp } from '../App'
 
 function ExportPage() {
-  const { t } = useApp()
   const [eleves, setEleves] = useState([])
   const [creneaux, setCreneaux] = useState([])
   const [presences, setPresences] = useState([])

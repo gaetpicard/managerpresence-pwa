@@ -4,7 +4,7 @@ import { FirebaseService } from '../services/FirebaseService'
 import { useApp } from '../App'
 
 function AuditPage() {
-  const { t, clubName } = useApp()
+  const { clubName } = useApp()
   const [logs, setLogs] = useState([])
   const [isLoading, setIsLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState('')

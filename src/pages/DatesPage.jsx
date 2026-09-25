@@ -4,7 +4,7 @@ import { FirebaseService } from '../services/FirebaseService'
 import { useApp } from '../App'
 
 function DatesPage() {
-  const { t, termes } = useApp()
+  const { termes } = useApp()
   const [seances, setSeances] = useState([])
   const [creneaux, setCreneaux] = useState([])
   const [isLoading, setIsLoading] = useState(true)
