@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import Layout from '../components/Layout'
 import { FirebaseService } from '../services/FirebaseService'
+import { lienMessagerie, ouvrirMessagerie } from '../services/Messagerie'
 
 function FicheMembrePage() {
   const { id } = useParams()
@@ -16,6 +17,8 @@ function FicheMembrePage() {
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState(null)
   const [activeTab, setActiveTab] = useState('infos')
+  // Adresse d'envoi du club (Paramètres > configuration email)
+  const [expediteur, setExpediteur] = useState('')
   const [periodeFilter, setPeriodeFilter] = useState('all')
   const [periodeDebut, setPeriodeDebut] = useState('')
   const [periodeFin, setPeriodeFin] = useState('')
@@ -33,11 +36,13 @@ function FicheMembrePage() {
     setIsLoading(true)
     try {
       if (FirebaseService.isInitialized()) {
-        const [elevesData, creneauxData, presencesData] = await Promise.all([
+        const [elevesData, creneauxData, presencesData, configEmail] = await Promise.all([
           FirebaseService.getEleves(),
           FirebaseService.getCreneaux(),
-          FirebaseService.getAllPresences()
+          FirebaseService.getAllPresences(),
+          FirebaseService.getEmailConfig()
         ])
+        setExpediteur(configEmail?.emailFrom || '')
         
         const membreData = elevesData.find(e => e.id === id)
         if (!membreData) {
@@ -159,9 +164,13 @@ function FicheMembrePage() {
       return
     }
     
-    const subject = encodeURIComponent(`[${membre.prenom} ${membre.nom}] - `)
-    const body = encodeURIComponent(`Bonjour ${membre.prenom},\n\n`)
-    window.open(`mailto:${membre.email}?subject=${subject}&body=${body}`, '_blank')
+    // Depuis la boîte configurée dans les Paramètres, pas celle de l'ordinateur
+    ouvrirMessagerie({
+      destinataire: membre.email,
+      sujet: `[${membre.prenom} ${membre.nom}] - `,
+      corps: `Bonjour ${membre.prenom},\n\n`,
+      expediteur
+    })
   }
 
   const exportPresences = () => {
@@ -400,7 +409,13 @@ function FicheMembrePage() {
               <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '4px' }}>EMAIL</p>
               <p style={{ fontSize: '16px', fontWeight: 500 }}>
                 {membre.email ? (
-                  <a href={`mailto:${membre.email}`} style={{ color: 'var(--info)' }}>
+                  <a
+                    href={lienMessagerie({ destinataire: membre.email, expediteur })}
+                    target="_blank"
+                    rel="noopener"
+                    style={{ color: 'var(--info)' }}
+                    title={expediteur ? `Écrire depuis ${expediteur}` : undefined}
+                  >
                     {membre.email}
                   </a>
                 ) : '-'}
