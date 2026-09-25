@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import Layout from '../components/Layout'
 import { FirebaseService } from '../services/FirebaseService'
+import { analyserCsv } from '../services/ImportCsv'
 import { useApp } from '../App'
 
 function MembresPage() {
@@ -26,6 +27,12 @@ function MembresPage() {
   })
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState(null)
+
+  // Import CSV
+  const fileInputRef = useRef(null)
+  const [importData, setImportData] = useState(null)
+  const [importEnCours, setImportEnCours] = useState(false)
+  const [importProgression, setImportProgression] = useState(0)
 
   useEffect(() => {
     loadData()
@@ -167,6 +174,93 @@ function MembresPage() {
     }
   }
 
+  // ── Import CSV ──────────────────────────────────────────────────────
+  const handleFichierCsv = async (e) => {
+    const fichier = e.target.files?.[0]
+    e.target.value = ''            // permet de réimporter le même fichier
+    if (!fichier) return
+
+    try {
+      const contenu = await fichier.text()
+      const resultat = analyserCsv(contenu, eleves)
+      if (resultat.erreur) {
+        showToast(resultat.erreur, 'error')
+        return
+      }
+      setImportData({ ...resultat, nomFichier: fichier.name })
+    } catch (error) {
+      console.error('Erreur lecture CSV:', error)
+      showToast('Impossible de lire ce fichier', 'error')
+    }
+  }
+
+  const basculerLigne = (numeroLigne) => {
+    setImportData(prev => ({
+      ...prev,
+      lignes: prev.lignes.map(l =>
+        l.numeroLigne === numeroLigne ? { ...l, selectionne: !l.selectionne } : l
+      )
+    }))
+  }
+
+  const toutSelectionner = (valeur) => {
+    setImportData(prev => ({
+      ...prev,
+      // Une ligne sans nom ni prénom reste inimportable
+      lignes: prev.lignes.map(l => ({
+        ...l,
+        selectionne: valeur && !l.anomalies.includes('Nom et prénom vides')
+      }))
+    }))
+  }
+
+  const lancerImport = async () => {
+    const aImporter = importData.lignes.filter(l => l.selectionne)
+    if (aImporter.length === 0) return
+
+    setImportEnCours(true)
+    setImportProgression(0)
+    let reussis = 0
+    const echecs = []
+
+    for (let i = 0; i < aImporter.length; i++) {
+      const ligne = aImporter[i]
+      try {
+        await FirebaseService.addEleve({
+          nom: ligne.nom,
+          prenom: ligne.prenom,
+          email: ligne.email,
+          telephones: ligne.telephones,
+          libelle: ligne.libelle,
+          numero_licence: ligne.numero_licence,
+          creneauxIds: [],
+          niveauIds: []
+        })
+        reussis++
+      } catch (error) {
+        console.error(`Ligne ${ligne.numeroLigne} :`, error)
+        echecs.push(`${ligne.nom} ${ligne.prenom}`.trim() || `ligne ${ligne.numeroLigne}`)
+      }
+      setImportProgression(Math.round(((i + 1) / aImporter.length) * 100))
+    }
+
+    await FirebaseService.addAuditLog(
+      'IMPORT_CSV',
+      `${reussis} ${termes.eleves.toLowerCase()}`,
+      `Import depuis la PWA (${importData.nomFichier})`
+    )
+
+    setImportEnCours(false)
+    setImportData(null)
+    await loadData()
+
+    if (echecs.length === 0) {
+      showToast(`${reussis} membre(s) importé(s)`, 'success')
+    } else {
+      showToast(`${reussis} importé(s), ${echecs.length} en échec : ${echecs.slice(0, 3).join(', ')}`, 'error')
+    }
+  }
+
   const exportCSV = () => {
     const headers = ['Nom', 'Prénom', 'Groupe', 'Téléphone', 'Email']
     const rows = eleves.map(e => [
@@ -241,6 +335,16 @@ function MembresPage() {
           <button className="btn btn-secondary btn-sm" onClick={exportCSV}>
             📤 CSV
           </button>
+          <button className="btn btn-secondary btn-sm" onClick={() => fileInputRef.current?.click()}>
+            📥 Importer
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".csv,text/csv,text/plain"
+            style={{ display: 'none' }}
+            onChange={handleFichierCsv}
+          />
           <button className="btn btn-primary btn-sm" onClick={openAddModal}>
             ➕ Ajouter
           </button>
@@ -348,6 +452,118 @@ function MembresPage() {
       </p>
 
       {/* Modal ajout/édition */}
+      {/* Aperçu avant import CSV */}
+      {importData && (
+        <div className="modal-overlay" onClick={() => !importEnCours && setImportData(null)}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '760px' }}>
+            <div className="modal-header">
+              <h2 className="modal-title">📥 Importer {importData.nomFichier}</h2>
+              {!importEnCours && (
+                <button className="modal-close" onClick={() => setImportData(null)}>×</button>
+              )}
+            </div>
+
+            <div className="modal-body">
+              {(() => {
+                const total = importData.lignes.length
+                const retenues = importData.lignes.filter(l => l.selectionne).length
+                const doublons = importData.lignes.filter(l => l.doublon).length
+                const anomalies = importData.lignes.filter(l => l.anomalies.length > 0).length
+                const colonnesVues = Object.entries(importData.colonnes)
+                  .filter(([, i]) => i >= 0)
+                  .map(([champ, i]) => `${champ} → « ${importData.enTetes[i]} »`)
+
+                return (
+                  <>
+                    <p style={{ fontSize: '0.85rem', marginTop: 0 }}>
+                      <strong>{total}</strong> ligne(s) lue(s) — <strong>{retenues}</strong> à importer
+                      {doublons > 0 && <> · {doublons} doublon(s) écarté(s)</>}
+                      {anomalies > 0 && <> · {anomalies} avec anomalie</>}
+                    </p>
+
+                    <p style={{ fontSize: '0.78rem', opacity: 0.75 }}>
+                      Colonnes reconnues : {colonnesVues.length ? colonnesVues.join(' · ') : 'aucune'}
+                    </p>
+
+                    <div style={{ display: 'flex', gap: '8px', margin: '10px 0' }}>
+                      <button className="btn btn-secondary btn-sm" disabled={importEnCours}
+                              onClick={() => toutSelectionner(true)}>Tout cocher</button>
+                      <button className="btn btn-secondary btn-sm" disabled={importEnCours}
+                              onClick={() => toutSelectionner(false)}>Tout décocher</button>
+                    </div>
+
+                    <div style={{ maxHeight: '320px', overflow: 'auto' }}>
+                      <table className="table" style={{ fontSize: '0.8rem' }}>
+                        <thead>
+                          <tr>
+                            <th style={{ width: '34px' }}></th>
+                            <th>Nom</th>
+                            <th>Prénom</th>
+                            <th>E-mail</th>
+                            <th>Téléphone</th>
+                            <th>État</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {importData.lignes.map(ligne => (
+                            <tr key={ligne.numeroLigne}
+                                style={{ opacity: ligne.selectionne ? 1 : 0.5 }}>
+                              <td>
+                                <input
+                                  type="checkbox"
+                                  checked={ligne.selectionne}
+                                  disabled={importEnCours || ligne.anomalies.includes('Nom et prénom vides')}
+                                  onChange={() => basculerLigne(ligne.numeroLigne)}
+                                />
+                              </td>
+                              <td>{ligne.nom}</td>
+                              <td>{ligne.prenom}</td>
+                              <td>{ligne.email}</td>
+                              <td>{ligne.telephones.map(t => t.numero).join(' / ')}</td>
+                              <td>
+                                {ligne.doublon && (
+                                  <span style={{ color: '#e6a23c' }}>⚠️ {ligne.doublon}</span>
+                                )}
+                                {ligne.anomalies.length > 0 && (
+                                  <span style={{ color: '#f56c6c' }}>
+                                    {ligne.doublon ? ' · ' : ''}{ligne.anomalies.join(', ')}
+                                  </span>
+                                )}
+                                {!ligne.doublon && ligne.anomalies.length === 0 && (
+                                  <span style={{ color: '#67c23a' }}>✓ nouveau</span>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {importEnCours && (
+                      <p style={{ fontSize: '0.85rem', marginBottom: 0 }}>
+                        Import en cours… {importProgression} %
+                      </p>
+                    )}
+                  </>
+                )
+              })()}
+            </div>
+
+            <div className="modal-footer">
+              <button className="btn btn-secondary" disabled={importEnCours}
+                      onClick={() => setImportData(null)}>Annuler</button>
+              <button className="btn btn-primary"
+                      disabled={importEnCours || importData.lignes.every(l => !l.selectionne)}
+                      onClick={lancerImport}>
+                {importEnCours
+                  ? `Import… ${importProgression} %`
+                  : `Importer ${importData.lignes.filter(l => l.selectionne).length} membre(s)`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showModal && (
         <div className="modal-overlay" onClick={() => setShowModal(false)}>
           <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '550px' }}>
