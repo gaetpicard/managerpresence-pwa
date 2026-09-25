@@ -5,7 +5,7 @@
 
 import { initializeApp, deleteApp, getApps } from 'firebase/app'
 import { getFirestore, collection, getDocs, doc, getDoc, setDoc, updateDoc, deleteDoc, query, where, orderBy } from 'firebase/firestore'
-import { getAuth, signInWithEmailAndPassword, signOut } from 'firebase/auth'
+import { getAuth, signInAnonymously, signOut } from 'firebase/auth'
 
 let app = null
 let db = null
@@ -26,10 +26,18 @@ export const FirebaseService = {
       app = initializeApp(config)
       db = getFirestore(app)
       auth = getAuth(app)
-      console.log('Firebase initialisé pour:', config.projectId)
+
+      // ⚠️ Indispensable : les règles Firestore refusent tout accès non
+      // authentifié (403 PERMISSION_DENIED). Sans cette connexion, chaque
+      // lecture renvoie une liste vide et la PWA paraît n'avoir aucune donnée.
+      await signInAnonymously(auth)
+
+      console.log('Firebase initialisé et authentifié pour:', config.projectId)
       return true
     } catch (error) {
       console.error('Erreur initialisation Firebase:', error)
+      db = null
+      auth = null
       throw error
     }
   },
