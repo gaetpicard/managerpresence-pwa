@@ -14,8 +14,9 @@ function MembresPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState('')
   const [niveaux, setNiveaux] = useState([])
-  // Filtres cumulables : plusieurs groupes et plusieurs passeports à la fois
+  // Filtres cumulables : plusieurs groupes, créneaux et passeports à la fois
   const [filtreGroupes, setFiltreGroupes] = useState([])
+  const [filtreCreneaux, setFiltreCreneaux] = useState([])
   const [filtreNiveaux, setFiltreNiveaux] = useState([])
   // Sélection pour l'envoi groupé
   const [selection, setSelection] = useState(new Set())
@@ -76,6 +77,12 @@ function MembresPage() {
   // Liste unique des groupes
   const uniqueGroupes = [...new Set(eleves.map(e => e.groupe).filter(Boolean))].sort()
 
+  // Créneaux dans l'ordre de leur nom, en comparant les nombres comme des
+  // nombres : sans cela « G10 » se placerait avant « G2 ».
+  const creneauxTries = [...creneaux].sort((a, b) =>
+    (a.nom || '').localeCompare(b.nom || '', 'fr', { numeric: true })
+  )
+
   const handleSort = (field) => {
     if (sortBy === field) {
       setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')
@@ -98,12 +105,19 @@ function MembresPage() {
       // l'un des choix : « jaunes ET orange » veut dire jaunes ou orange.
       const matchGroupe = filtreGroupes.length === 0 || filtreGroupes.includes(e.groupe)
 
+      // Un membre peut être inscrit à plusieurs créneaux : il suffit qu'il soit
+      // dans l'un des créneaux cochés.
+      const creneauxMembre = Array.isArray(e.creneauxIds) ? e.creneauxIds : []
+      const matchCreneau = filtreCreneaux.length === 0 || filtreCreneaux.some(f =>
+        f === '__aucun' ? creneauxMembre.length === 0 : creneauxMembre.includes(f)
+      )
+
       const niveauxMembre = Array.isArray(e.niveauIds) ? e.niveauIds : []
       const matchNiveau = filtreNiveaux.length === 0 || filtreNiveaux.some(f =>
         f === '__aucun' ? niveauxMembre.length === 0 : niveauxMembre.includes(f)
       )
 
-      return matchSearch && matchGroupe && matchNiveau
+      return matchSearch && matchGroupe && matchCreneau && matchNiveau
     })
     .sort((a, b) => {
       const aVal = (a[sortBy] || '').toLowerCase()
@@ -481,7 +495,7 @@ function MembresPage() {
         </div>
       </div>
 
-      {/* Filtres cumulables : plusieurs groupes et plusieurs passeports à la fois */}
+      {/* Filtres cumulables : groupes, créneaux et passeports se combinent */}
       <div className="card" style={{ marginBottom: 'var(--spacing-md)', padding: 'var(--spacing-md)' }}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '18px', alignItems: 'flex-start' }}>
 
@@ -508,6 +522,45 @@ function MembresPage() {
                     </button>
                   )
                 })}
+              </div>
+            </div>
+          )}
+
+          {creneauxTries.length > 0 && (
+            <div>
+              <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '6px' }}>
+                CRÉNEAUX
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                {creneauxTries.map(c => {
+                  const actif = filtreCreneaux.includes(c.id)
+                  return (
+                    <button
+                      key={c.id}
+                      className="btn btn-sm"
+                      title={[c.jour, c.heure].filter(Boolean).join(' • ')}
+                      onClick={() => basculerFiltre(setFiltreCreneaux, c.id)}
+                      style={{
+                        background: actif ? 'var(--primary)' : 'var(--bg-elevated)',
+                        color: actif ? '#fff' : 'var(--text-secondary)',
+                        border: '1px solid rgba(255,255,255,0.15)'
+                      }}
+                    >
+                      {c.nom}
+                    </button>
+                  )
+                })}
+                <button
+                  className="btn btn-sm"
+                  onClick={() => basculerFiltre(setFiltreCreneaux, '__aucun')}
+                  style={{
+                    background: filtreCreneaux.includes('__aucun') ? 'var(--primary)' : 'var(--bg-elevated)',
+                    color: filtreCreneaux.includes('__aucun') ? '#fff' : 'var(--text-secondary)',
+                    border: '1px solid rgba(255,255,255,0.15)'
+                  }}
+                >
+                  sans créneau
+                </button>
               </div>
             </div>
           )}
@@ -554,10 +607,10 @@ function MembresPage() {
             <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
               {filteredAndSortedEleves.length} / {eleves.length}
             </span>
-            {(filtreGroupes.length > 0 || filtreNiveaux.length > 0) && (
+            {(filtreGroupes.length > 0 || filtreCreneaux.length > 0 || filtreNiveaux.length > 0) && (
               <button
                 className="btn btn-secondary btn-sm"
-                onClick={() => { setFiltreGroupes([]); setFiltreNiveaux([]) }}
+                onClick={() => { setFiltreGroupes([]); setFiltreCreneaux([]); setFiltreNiveaux([]) }}
               >
                 ✕ Effacer les filtres
               </button>
