@@ -1,9 +1,38 @@
-import React from 'react'
+import React, { useRef, useLayoutEffect } from 'react'
 import { NavLink } from 'react-router-dom'
 import { useApp } from '../App'
 
+/**
+ * Position de defilement du menu, conservee HORS du composant.
+ *
+ * Chaque page rend sa propre instance de Layout : a chaque navigation, le menu
+ * est donc demonte puis remonte, et repartait invariablement en haut. Tres
+ * penible des que la liste depasse la hauteur de l'ecran (ou, sur telephone,
+ * ou le menu defile horizontalement). Une variable de module survit a ces
+ * remontages, la ou un useState serait reinitialise avec le composant.
+ */
+let defilementMenu = { haut: 0, gauche: 0 }
+
 function Layout({ children, title }) {
   const { clubName, licence, deconnecter, generatedBy, termes } = useApp()
+  const menuRef = useRef(null)
+
+  // useLayoutEffect et non useEffect : la position est retablie AVANT le
+  // premier affichage, sinon on verrait le menu sauter en haut puis revenir.
+  useLayoutEffect(() => {
+    const menu = menuRef.current
+    if (!menu) return
+    menu.scrollTop = defilementMenu.haut
+    menu.scrollLeft = defilementMenu.gauche
+    const memoriser = () => {
+      defilementMenu = { haut: menu.scrollTop, gauche: menu.scrollLeft }
+    }
+    menu.addEventListener('scroll', memoriser, { passive: true })
+    return () => {
+      memoriser()                      // derniere position avant de disparaitre
+      menu.removeEventListener('scroll', memoriser)
+    }
+  }, [])
 
   // 🏷️ Navigation avec termes dynamiques
   const navItems = [
@@ -55,7 +84,7 @@ function Layout({ children, title }) {
           </div>
         </div>
 
-        <nav className="sidebar-nav">
+        <nav className="sidebar-nav" ref={menuRef}>
           {navItems.map(item => (
             <NavLink 
               key={item.path}

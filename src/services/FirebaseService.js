@@ -6,7 +6,9 @@
 import { initializeApp, deleteApp, getApps } from 'firebase/app'
 import { getFirestore, collection, getDocs, doc, getDoc, setDoc, updateDoc, deleteDoc, query, where, orderBy } from 'firebase/firestore'
 import { getAuth, signInAnonymously, signOut } from 'firebase/auth'
+import { initializeAppCheck, ReCaptchaEnterpriseProvider } from 'firebase/app-check'
 import { genererDates } from './CalendrierScolaire'
+import { calculerDeplacementCreneau } from './MigrationCreneaux'
 
 let app = null
 let db = null
@@ -24,14 +26,36 @@ export const FirebaseService = {
     }
     
     try {
-      app = initializeApp(config)
+      // La clé reCAPTCHA n'est pas un réglage Firebase : on la retire de la config
+      const { recaptchaSiteKey, ...firebaseConfig } = config
+      app = initializeApp(firebaseConfig)
+
+      // 🛡️ App Check (structures créées automatiquement) : leur base n'accepte que
+      // l'app officielle et cette PWA. À installer AVANT le premier accès à la base.
+      if (recaptchaSiteKey) {
+        initializeAppCheck(app, {
+          provider: new ReCaptchaEnterpriseProvider(recaptchaSiteKey),
+          isTokenAutoRefreshEnabled: true
+        })
+      }
+
       db = getFirestore(app)
       auth = getAuth(app)
 
-      // ⚠️ Indispensable : les règles Firestore refusent tout accès non
-      // authentifié (403 PERMISSION_DENIED). Sans cette connexion, chaque
-      // lecture renvoie une liste vide et la PWA paraît n'avoir aucune donnée.
-      await signInAnonymously(auth)
+      // ⚠️ Indispensable là où l'authentification existe : les règles Firestore
+      // refusent alors tout accès non authentifié (403 PERMISSION_DENIED), et
+      // chaque lecture renverrait une liste vide.
+      // Sur les structures créées automatiquement, l'authentification n'existe pas
+      // (CONFIGURATION_NOT_FOUND : elle exige la facturation chez Google) : la
+      // protection y vient d'App Check, donc on continue sans connexion.
+      try {
+        await signInAnonymously(auth)
+      } catch (authError) {
+        if (!recaptchaSiteKey && !String(authError?.code || authError?.message).includes('configuration-not-found')) {
+          throw authError
+        }
+        console.warn('Connexion anonyme indisponible, accès protégé par App Check :', authError?.code)
+      }
 
       console.log('Firebase initialisé et authentifié pour:', config.projectId)
       return true
@@ -484,6 +508,55 @@ export const FirebaseService = {
     }
 
     await updateDoc(doc(db, 'seances', seance.id), { presences })
+  },
+
+  /**
+   * Déplace les pointages d'un élève quand il change de créneau.
+   *
+   * Les pointages ne sont pas dans une collection à part : ils vivent dans le
+   * champ `presences` du document `seances`, sous la clé "<eleveId>_<creneauId>".
+   * Le créneau fait donc partie de la clé — changer un élève de créneau rend
+   * d'un coup tout son historique introuvable, puisqu'on le cherche ensuite
+   * sous une clé qui n'existe pas.
+   *
+   * Ne migre que le cas sans ambiguïté : un seul créneau d'arrivée. Ajouté à
+   * plusieurs créneaux d'un coup, on ne saurait pas lequel choisir, et mieux
+   * vaut ne rien réécrire que de deviner.
+   *
+   * Un pointage déjà saisi sur le créneau d'arrivée n'est jamais écrasé.
+   *
+   * @returns le nombre de pointages déplacés
+   */
+  async migrerPointagesVersNouveauCreneau(eleveId, anciensCreneaux, nouveauxCreneaux) {
+    if (!db) return 0
+    // La regle de decision vit dans MigrationCreneaux.js, pour etre
+    // verifiable sans base de donnees (voir ses cas de test).
+    const plan = calculerDeplacementCreneau(anciensCreneaux, nouveauxCreneaux)
+    if (!plan) return 0
+    const { retires, destination } = plan
+
+    const seances = await this.getSeances()
+    let deplaces = 0
+    for (const seance of seances) {
+      const presences = { ...(seance.presences || {}) }
+      const cleArrivee = `${eleveId}_${destination}`
+      if (presences[cleArrivee] !== undefined) continue   // déjà pointé sur le nouveau créneau
+
+      let touche = false
+      for (const ancien of retires) {
+        const cleDepart = `${eleveId}_${ancien}`
+        if (presences[cleDepart] === undefined) continue
+        presences[cleArrivee] = presences[cleDepart]
+        delete presences[cleDepart]
+        touche = true
+        deplaces++
+        break                                             // une seule valeur par séance
+      }
+      if (touche) {
+        await updateDoc(doc(db, 'seances', seance.id), { presences })
+      }
+    }
+    return deplaces
   },
 
   // ========================================

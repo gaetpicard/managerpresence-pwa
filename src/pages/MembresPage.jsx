@@ -268,7 +268,17 @@ function MembresPage() {
     try {
       if (editingEleve) {
         await FirebaseService.updateEleve(editingEleve.id, formData)
-        showToast('Membre modifié avec succès', 'success')
+        // Les pointages suivent le membre : le créneau fait partie de leur clé,
+        // donc sans ce déplacement tout son historique devient introuvable.
+        const deplaces = await FirebaseService.migrerPointagesVersNouveauCreneau(
+          editingEleve.id, editingEleve.creneauxIds, formData.creneauxIds
+        )
+        showToast(
+          deplaces > 0
+            ? `Membre modifié — ${deplaces} pointage(s) déplacé(s) vers le nouveau créneau`
+            : 'Membre modifié avec succès',
+          'success'
+        )
       } else {
         await FirebaseService.addEleve(formData)
         showToast('Membre ajouté avec succès', 'success')

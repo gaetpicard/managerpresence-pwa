@@ -68,10 +68,13 @@ function FicheMembrePage() {
         setCreneaux(creneauxData)
         
         // Filtrer les présences de ce membre
-        const membrePresences = presencesData
-          .filter(p => p.eleveId === id)
-          .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
-        setPresences(membrePresences)
+        const sesPresences = presencesData.filter(p => p.eleveId === id)
+        // Les dates sont en « JJ/MM », sans année : un tri alphabétique place
+        // « 03/10 » avant « 12/09 », donc janvier avant septembre. On trie par
+        // la clé de saison, du plus récent au plus ancien.
+        const debut = moisDebutSaison(sesPresences.map(p => p.date))
+        sesPresences.sort((a, b) => cleTri(b.date, debut) - cleTri(a.date, debut))
+        setPresences(sesPresences)
       }
     } catch (error) {
       console.error('Erreur chargement:', error)
@@ -134,8 +137,9 @@ function FicheMembrePage() {
     const retard = filtered.filter(p => p.present === 'retard').length
     const tauxPresence = total > 0 ? Math.round(((present + retard) / total) * 100) : 0
     
-    // Première et dernière date
-    const dates = filtered.map(p => p.date).filter(Boolean).sort()
+    // Première et dernière date, dans l'ordre de la saison et non de l'alphabet
+    const dates = filtered.map(p => p.date).filter(Boolean)
+      .sort((a, b) => cleTri(a, debutSaison) - cleTri(b, debutSaison))
     const premiereDate = dates[0] || null
     const derniereDate = dates[dates.length - 1] || null
     
@@ -157,9 +161,19 @@ function FicheMembrePage() {
     setSaving(true)
     try {
       await FirebaseService.updateEleve(id, formData)
+      // Les pointages suivent le membre : le créneau fait partie de leur clé,
+      // donc sans ce déplacement tout son historique devient introuvable.
+      const deplaces = await FirebaseService.migrerPointagesVersNouveauCreneau(
+        id, membre.creneauxIds, formData.creneauxIds
+      )
       setMembre({ ...membre, ...formData })
       setIsEditing(false)
-      showToast('Membre mis à jour', 'success')
+      showToast(
+        deplaces > 0
+          ? `Membre mis à jour — ${deplaces} pointage(s) déplacé(s) vers le nouveau créneau`
+          : 'Membre mis à jour',
+        'success'
+      )
     } catch (error) {
       console.error('Erreur sauvegarde:', error)
       showToast('Erreur lors de la sauvegarde', 'error')
@@ -285,7 +299,12 @@ function FicheMembrePage() {
 
   const formatDate = (dateStr) => {
     if (!dateStr) return '-'
-    return new Date(dateStr).toLocaleDateString('fr-FR', {
+    // Une date de séance est un « JJ/MM » sans année : `new Date('12/09')` ne
+    // veut rien dire et renvoyait « Invalid Date ». L'année se déduit du mois
+    // d'ouverture de la saison, comme partout ailleurs dans l'application.
+    const reelle = dateReelle(dateStr, debutSaison)
+    if (!reelle) return dateStr
+    return reelle.toLocaleDateString('fr-FR', {
       weekday: 'short',
       day: 'numeric',
       month: 'short',

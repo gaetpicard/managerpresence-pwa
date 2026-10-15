@@ -1,11 +1,44 @@
 import React, { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import Layout from '../components/Layout'
 import { FirebaseService } from '../services/FirebaseService'
 import { moisDebutSaison, cleTri } from '../services/CalendrierScolaire'
 import { useApp } from '../App'
 
+/**
+ * Nom d'un membre, cliquable : mene a sa fiche.
+ * Un <button> plutot qu'un <span> : on garde le focus clavier et la lecture
+ * d'ecran annonce un element actionnable, ce qu'un texte cliquable ne fait pas.
+ */
+function NomMembre({ eleve, onOuvrir, nomAttenue = false }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onOuvrir(eleve.id)}
+      title={`Ouvrir la fiche de ${eleve.prenom} ${eleve.nom}`}
+      style={{
+        background: 'none',
+        border: 0,
+        padding: 0,
+        font: 'inherit',
+        color: 'inherit',
+        cursor: 'pointer',
+        textAlign: 'left'
+      }}
+      onMouseEnter={e => { e.currentTarget.style.textDecoration = 'underline' }}
+      onMouseLeave={e => { e.currentTarget.style.textDecoration = 'none' }}
+    >
+      {eleve.prenom}{' '}
+      {nomAttenue
+        ? <span style={{ color: 'var(--text-muted)' }}>{eleve.nom}</span>
+        : eleve.nom}
+    </button>
+  )
+}
+
 function PresencesPage() {
   const { termes, clubName } = useApp()
+  const navigate = useNavigate()
   const [eleves, setEleves] = useState([])
   const [creneaux, setCreneaux] = useState([])
   const [seances, setSeances] = useState([])
@@ -316,7 +349,11 @@ function PresencesPage() {
                         fontSize: '13px',
                         borderRight: '2px solid var(--border)'
                       }}>
-                        {eleve.prenom} <span style={{ color: 'var(--text-muted)' }}>{eleve.nom}</span>
+                        <NomMembre
+                          eleve={eleve}
+                          nomAttenue
+                          onOuvrir={id => navigate(`/membre/${id}`)}
+                        />
                       </td>
                       {seancesCreneau.map(seance => renderPresenceCell(seance, eleve.id, creneau.id))}
                     </tr>
@@ -364,7 +401,12 @@ function PresencesPage() {
                   
                   return (
                     <tr key={`${eleve.id}-${creneau.id}`}>
-                      <td>{eleve.prenom} {eleve.nom}</td>
+                      <td>
+                        <NomMembre
+                          eleve={eleve}
+                          onOuvrir={id => navigate(`/membre/${id}`)}
+                        />
+                      </td>
                       <td>
                         <span style={{ 
                           background: 'var(--info)', 
