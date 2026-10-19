@@ -136,6 +136,10 @@ export async function telechargerVacances(zone, annee) {
 export function estEnVacances(date, vacances) {
   return vacances.some(p => {
     const d = versDate(p.debut)
+    // Le calendrier officiel fait partir les vacances le samedi qui suit le
+    // dernier jour de classe : ce samedi (et ce dimanche) restent des jours de cours.
+    if (d.getDay() === 6) d.setDate(d.getDate() + 2)
+    else if (d.getDay() === 0) d.setDate(d.getDate() + 1)
     const f = versDate(p.fin)
     f.setHours(23, 59, 59, 999)
     return date >= d && date <= f
