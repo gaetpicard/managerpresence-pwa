@@ -3,6 +3,7 @@ import Layout from '../components/Layout'
 import { FirebaseService } from '../services/FirebaseService'
 import { moisDebutSaison, dateReelle } from '../services/CalendrierScolaire'
 import { useApp } from '../App'
+import SortiesOnglet from './SortiesOnglet'
 
 /**
  * Disponibilités des encadrants (même données que l'application, voir Disponibilites.kt).
@@ -36,6 +37,7 @@ function DisposPage() {
   const [message, setMessage] = useState('')
   const [showJauges, setShowJauges] = useState(false)
   const [toast, setToast] = useState(null)
+  const [sorties, setSorties] = useState([])
   // Jauges réglables par les administrateurs seulement (rôle du cadre qui a généré le code d'accès)
   const estAdmin = cadres.find(c => c.id === generatedBy)?.role === 'ADMIN'
 
@@ -44,11 +46,12 @@ function DisposPage() {
   const charger = async () => {
     setIsLoading(true)
     try {
-      const [s, cr, ca, d, j, f] = await Promise.all([
+      const [s, cr, ca, d, j, f, so] = await Promise.all([
         FirebaseService.getSeances(), FirebaseService.getCreneaux(), FirebaseService.getCadres(),
-        FirebaseService.getDispos(), FirebaseService.getJaugesDispos(), FirebaseService.getForumMessages()
+        FirebaseService.getDispos(), FirebaseService.getJaugesDispos(), FirebaseService.getForumMessages(),
+        FirebaseService.getSorties()
       ])
-      setSeances(s); setCreneaux(cr); setCadres(ca); setDispos(d); setJauges(j); setForum(f)
+      setSeances(s); setCreneaux(cr); setCadres(ca); setDispos(d); setJauges(j); setForum(f); setSorties(so)
       setPourQui(prev => prev || (ca.some(c => c.id === generatedBy) ? generatedBy : ''))
     } catch (e) {
       console.error('Erreur chargement dispos:', e)
@@ -68,6 +71,7 @@ function DisposPage() {
     .filter(s => (s.creneauxActifsIds || []).length > 0)
     .map(s => ({ ...s, reelle: dateReelle(s.date, debutSaison) }))
     .filter(s => s.reelle)
+    .filter(s => !sorties.some(so => so.annulerSalle && so.jour === idJour(s.reelle)))
   const prochaines = avecDate.filter(s => s.reelle >= minuit).sort((a, b) => a.reelle - b.reelle).slice(0, NB_SEANCES)
   const passees = avecDate.filter(s => s.reelle <= new Date()).sort((a, b) => b.reelle - a.reelle)
   const nomCreneau = id => creneaux.find(c => c.id === id)
@@ -161,8 +165,9 @@ function DisposPage() {
     <Layout title="Disponibilités">
       <div className="card" style={{ marginBottom: 'var(--spacing-md)', display: 'flex', flexWrap: 'wrap', gap: 'var(--spacing-md)', alignItems: 'center' }}>
         <button className={`btn btn-sm ${onglet === 'prochaines' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setOnglet('prochaines')}>Prochaines {(termes?.seances || 'séances').toLowerCase()}</button>
+        <button className={`btn btn-sm ${onglet === 'sorties' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setOnglet('sorties')}>🏔 Sorties</button>
         <button className={`btn btn-sm ${onglet === 'journal' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setOnglet('journal')}>Journal</button>
-        {onglet === 'prochaines' && (
+        {onglet !== 'journal' && (
           <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             Répondre pour :
             <select className="form-input" value={pourQui} onChange={e => setPourQui(e.target.value)} style={{ width: 'auto' }}>
@@ -262,6 +267,24 @@ function DisposPage() {
             </div>
           )
         }))}
+
+      {onglet === 'sorties' && (
+        <SortiesOnglet
+          sorties={sorties}
+          recharger={async () => setSorties(await FirebaseService.getSorties())}
+          cadres={cadres}
+          creneaux={creneaux}
+          pourQui={pourQui}
+          auteur={generatedBy || 'PWA'}
+          dateEnJour={jjmm => {
+            const d = dateReelle(jjmm, debutSaison)
+            if (!d || `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}` !== jjmm) return null
+            return idJour(d)
+          }}
+          datesProposees={prochaines.map(s => ({ date: s.date, libelle: titreJour(s) }))}
+          showToast={showToast}
+        />
+      )}
 
       {onglet === 'journal' && (() => {
         const bilan = {}

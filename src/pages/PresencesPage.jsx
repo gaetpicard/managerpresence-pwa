@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import Layout from '../components/Layout'
 import { FirebaseService } from '../services/FirebaseService'
-import { moisDebutSaison, cleTri } from '../services/CalendrierScolaire'
+import { moisDebutSaison, cleTri, dateReelle } from '../services/CalendrierScolaire'
 import { useApp } from '../App'
 
 /**
@@ -42,6 +42,8 @@ function PresencesPage() {
   const [eleves, setEleves] = useState([])
   const [creneaux, setCreneaux] = useState([])
   const [seances, setSeances] = useState([])
+  const [sorties, setSorties] = useState([])
+  const [debutSaison, setDebutSaison] = useState(9)
   const [isLoading, setIsLoading] = useState(true)
   const [toast, setToast] = useState(null)
   
@@ -61,11 +63,13 @@ function PresencesPage() {
     setIsLoading(true)
     try {
       if (FirebaseService.isInitialized()) {
-        const [elevesData, creneauxData, seancesData] = await Promise.all([
+        const [elevesData, creneauxData, seancesData, sortiesData] = await Promise.all([
           FirebaseService.getEleves(),
           FirebaseService.getCreneaux(),
-          FirebaseService.getSeances()
+          FirebaseService.getSeances(),
+          FirebaseService.getSorties()
         ])
+        setSorties(sortiesData)
 
         setEleves(elevesData)
         setCreneaux(creneauxData)
@@ -74,6 +78,7 @@ function PresencesPage() {
         // Les dates sont en « JJ/MM » : l'ordre dépend du mois d'ouverture
         // de la saison, sans quoi janvier passerait avant septembre.
         const debutSaison = moisDebutSaison(seancesData.map(s => s.date))
+        setDebutSaison(debutSaison)
         const sorted = [...seancesData].sort(
           (a, b) => cleTri(a.date, debutSaison) - cleTri(b.date, debutSaison)
         )
@@ -110,6 +115,9 @@ function PresencesPage() {
       const key = `${eleveId}_${creneauId || ''}`
       const presence = seance.presences?.[key]
       
+      // En sortie ou salle annulée ce jour-là : la séance ne compte pas
+      const duJour = sortiesDuJour(seance)
+      if (duJour.some(s => s.annulerSalle || (s.eleves || []).includes(eleveId))) return
       if (seance.creneauxActifsIds?.includes(creneauId || filterCreneau)) {
         total++
         if (presence === 'PRESENT' || presence === true) present++
@@ -124,8 +132,22 @@ function PresencesPage() {
   }
 
   // Rendu d'une cellule de présence
+  // 🏔 Sorties du jour d'une séance (le document de sortie porte la date complète AAAA-MM-JJ)
+  const sortiesDuJour = seance => {
+    const d = dateReelle(seance.date, debutSaison)
+    if (!d) return []
+    const id = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    return sorties.filter(s => s.jour === id)
+  }
+
   const renderPresenceCell = (seance, eleveId, creneauId) => {
-    const isActive = seance.creneauxActifsIds?.includes(creneauId)
+    const duJour = sortiesDuJour(seance)
+    const isActive = seance.creneauxActifsIds?.includes(creneauId) && !duJour.some(s => s.annulerSalle)
+    if (isActive && duJour.some(s => (s.eleves || []).includes(eleveId))) {
+      return (
+        <td key={seance.id} title="En sortie" style={{ background: '#bbdefb', textAlign: 'center', padding: '4px', border: '1px solid var(--border)' }}>🏔</td>
+      )
+    }
     if (!isActive) {
       return (
         <td key={seance.id} style={{ 

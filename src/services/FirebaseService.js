@@ -4,7 +4,7 @@
  */
 
 import { initializeApp, deleteApp, getApps } from 'firebase/app'
-import { getFirestore, collection, getDocs, doc, getDoc, setDoc, updateDoc, deleteDoc, query, where, orderBy, arrayUnion, arrayRemove } from 'firebase/firestore'
+import { getFirestore, collection, getDocs, doc, getDoc, setDoc, updateDoc, deleteDoc, query, where, orderBy, arrayUnion, arrayRemove, FieldPath } from 'firebase/firestore'
 import { getAuth, signInAnonymously, signOut } from 'firebase/auth'
 import { initializeAppCheck, ReCaptchaEnterpriseProvider } from 'firebase/app-check'
 import { genererDates } from './CalendrierScolaire'
@@ -755,6 +755,57 @@ export const FirebaseService = {
   async reglerJaugeDispo(creneauId, n) {
     if (!db) throw new Error('Firebase non initialisé')
     await setDoc(doc(db, 'config', 'dispos'), { jauges: { [creneauId]: n } }, { merge: true })
+  },
+
+  // ========================================
+  // SORTIES (même données que Sorties.kt de l'application)
+  // ========================================
+
+  async getSorties() {
+    if (!db) return []
+    try {
+      const snapshot = await getDocs(collection(db, 'sorties'))
+      return snapshot.docs.map(d => ({ id: d.id, ...d.data() }))
+    } catch (error) {
+      console.error('Erreur getSorties:', error)
+      return []
+    }
+  },
+
+  /** Création (sans id) ou modification des champs éditables d'une sortie */
+  async enregistrerSortie(sortie, auteur) {
+    if (!db) throw new Error('Firebase non initialisé')
+    const champs = {
+      titre: sortie.titre, date: sortie.date, jour: sortie.jour,
+      heureDebut: sortie.heureDebut, heureFin: sortie.heureFin, lieu: sortie.lieu,
+      jauge: sortie.jauge || 0, eleves: sortie.eleves || [], cadres: sortie.cadres || [],
+      annulerSalle: !!sortie.annulerSalle
+    }
+    if (sortie.id) {
+      await setDoc(doc(db, 'sorties', sortie.id), champs, { merge: true })
+    } else {
+      await setDoc(doc(collection(db, 'sorties')), { ...champs, creePar: auteur, ts: Date.now(), valide: false })
+    }
+  },
+
+  async supprimerSortie(id) {
+    if (!db) throw new Error('Firebase non initialisé')
+    await deleteDoc(doc(db, 'sorties', id))
+  },
+
+  async voterSortie(id, cadre, v, par) {
+    if (!db) throw new Error('Firebase non initialisé')
+    await updateDoc(doc(db, 'sorties', id), new FieldPath('votes', cadre), { v, par, ts: Date.now() })
+  },
+
+  async pointerSortie(id, eleveId, valeur) {
+    if (!db) throw new Error('Firebase non initialisé')
+    await updateDoc(doc(db, 'sorties', id), new FieldPath('presences', eleveId), valeur)
+  },
+
+  async validerSortie(id, cadreReferent, presentsCadres) {
+    if (!db) throw new Error('Firebase non initialisé')
+    await updateDoc(doc(db, 'sorties', id), { valide: true, cadreReferent, presentsCadres })
   },
 
   // ========================================
