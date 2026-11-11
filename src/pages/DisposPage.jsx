@@ -294,7 +294,14 @@ function DisposPage() {
 
       {onglet === 'journal' && (() => {
         const bilan = {}
-        passees.forEach(s => Object.values(jourDe(s).presents || {}).flat().forEach(n => { bilan[n] = (bilan[n] || 0) + 1 }))
+        // Présents d'un créneau : cochés à l'appel, sinon le cadre qui a validé l'appel
+        const presentsDe = (s, crId) => {
+          const coches = (jourDe(s).presents || {})[crId] || []
+          if (coches.length) return coches
+          const validateur = (s.cadreValidateur || {})[crId]
+          return validateur ? [validateur] : []
+        }
+        passees.forEach(s => s.creneauxActifsIds.forEach(crId => presentsDe(s, crId).forEach(n => { bilan[n] = (bilan[n] || 0) + 1 })))
         return (
           <div className="card">
             <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>✓ = coché présent à l'appel · (oui) = s'était dit disponible</p>
@@ -311,7 +318,7 @@ function DisposPage() {
                 <div key={s.id} style={{ marginBottom: 8 }}>
                   <strong>{titreJour(s)}</strong>
                   {s.creneauxActifsIds.map(id => nomCreneau(id)).filter(Boolean).map(cr => {
-                    const coches = (jour.presents || {})[cr.id] || []
+                    const coches = presentsDe(s, cr.id)
                     const votes = (jour.votes || {})[cr.id] || {}
                     const ouiSeuls = Object.keys(votes).filter(n => votes[n].v === 'OUI' && !coches.includes(n))
                     const texte = [...[...coches].sort().map(n => `✓ ${n}`), ...ouiSeuls.sort().map(n => `${n} (oui)`)].join(', ') || 'personne de noté'
