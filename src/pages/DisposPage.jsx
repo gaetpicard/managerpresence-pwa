@@ -36,6 +36,8 @@ function DisposPage() {
   const [message, setMessage] = useState('')
   const [showJauges, setShowJauges] = useState(false)
   const [toast, setToast] = useState(null)
+  // Jauges réglables par les administrateurs seulement (rôle du cadre qui a généré le code d'accès)
+  const estAdmin = cadres.find(c => c.id === generatedBy)?.role === 'ADMIN'
 
   useEffect(() => { charger() }, [])
 
@@ -169,11 +171,11 @@ function DisposPage() {
             </select>
           </label>
         )}
-        <button className="btn btn-secondary btn-sm" onClick={() => setShowJauges(!showJauges)}>⚙ Jauges</button>
+        {estAdmin && <button className="btn btn-secondary btn-sm" onClick={() => setShowJauges(!showJauges)}>⚙ Jauges</button>}
         <button className="btn btn-secondary btn-sm" onClick={charger}>🔄</button>
       </div>
 
-      {showJauges && (
+      {estAdmin && showJauges && (
         <div className="card" style={{ marginBottom: 'var(--spacing-md)' }}>
           <h3 className="card-title">Encadrants idéaux par {(termes?.creneau || 'créneau').toLowerCase()}</h3>
           <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>0 = pas de jauge (jamais en orange).</p>
@@ -197,7 +199,7 @@ function DisposPage() {
           const fil = filDe(s.date)
           const reponses = reponsesDe(fil)
           return (
-            <div key={s.id} className="card" style={{ marginBottom: 'var(--spacing-md)', background: alerte ? '#ffe0b2' : undefined }}>
+            <div key={s.id} className="card" style={{ marginBottom: 'var(--spacing-md)', border: alerte ? '3px solid #e65100' : undefined }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <strong>{titreJour(s)}</strong>
                 <button className="btn btn-secondary btn-sm" onClick={() => setOuvert(ouvert === s.date ? null : s.date)}>
@@ -212,7 +214,7 @@ function DisposPage() {
                 const monVote = votes[pourQui]
                 const sansReponse = cadres.map(c => c.id).filter(n => !votes[n]).sort()
                 return (
-                  <div key={cr.id} style={{ marginTop: 10 }}>
+                  <div key={cr.id} style={{ marginTop: 10, ...(sous ? { border: '2px solid #e65100', background: '#ffe0b2', borderRadius: 8, padding: 6 } : {}) }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                       <span>{cr.nom} {cr.heureDebut}-{cr.heureFin}</span>
                       <strong style={{ color: sous ? '#e65100' : '#2e7d32' }}>{jauge > 0 ? `${oui}/${jauge} encadrant(s)` : `${oui} oui`}</strong>
