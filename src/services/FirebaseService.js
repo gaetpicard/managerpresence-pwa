@@ -4,7 +4,7 @@
  */
 
 import { initializeApp, deleteApp, getApps } from 'firebase/app'
-import { getFirestore, collection, getDocs, doc, getDoc, setDoc, updateDoc, deleteDoc, query, where, orderBy } from 'firebase/firestore'
+import { getFirestore, collection, getDocs, doc, getDoc, setDoc, updateDoc, deleteDoc, query, where, orderBy, arrayUnion, arrayRemove } from 'firebase/firestore'
 import { getAuth, signInAnonymously, signOut } from 'firebase/auth'
 import { initializeAppCheck, ReCaptchaEnterpriseProvider } from 'firebase/app-check'
 import { genererDates } from './CalendrierScolaire'
@@ -698,6 +698,63 @@ export const FirebaseService = {
   async deleteForumMessage(id) {
     if (!db) throw new Error('Firebase non initialisé')
     await deleteDoc(doc(db, 'forum', id))
+  },
+
+  // ========================================
+  // DISPONIBILITÉS DES ENCADRANTS
+  // ========================================
+
+  // Même format que l'application (voir Disponibilites.kt) :
+  // `dispos/<AAAA-MM-JJ>` = { date: "JJ/MM", votes: { creneauId: { cadreNom: { v, par, ts } } },
+  //                           presents: { creneauId: [cadreNom] } }
+  // `config/dispos` = { jauges: { creneauId: nombre } }
+  // Rien n'est écrit dans `seances` : l'application réécrit ce document en entier.
+
+  /** Tous les jours de dispos, indexés par identifiant AAAA-MM-JJ */
+  async getDispos() {
+    if (!db) return {}
+    try {
+      const snapshot = await getDocs(collection(db, 'dispos'))
+      const jours = {}
+      snapshot.docs.forEach(d => { jours[d.id] = d.data() })
+      return jours
+    } catch (error) {
+      console.error('Erreur getDispos:', error)
+      return {}
+    }
+  },
+
+  async voterDispo(idJour, date, creneauId, cadre, v, par) {
+    if (!db) throw new Error('Firebase non initialisé')
+    await setDoc(doc(db, 'dispos', idJour), {
+      date,
+      votes: { [creneauId]: { [cadre]: { v, par, ts: Date.now() } } }
+    }, { merge: true })
+  },
+
+  /** Cadre arrivé au dernier moment (ou retiré) : sans écraser les autres cochés */
+  async basculerPresentDispo(idJour, date, creneauId, cadre, present) {
+    if (!db) throw new Error('Firebase non initialisé')
+    await setDoc(doc(db, 'dispos', idJour), {
+      date,
+      presents: { [creneauId]: present ? arrayUnion(cadre) : arrayRemove(cadre) }
+    }, { merge: true })
+  },
+
+  async getJaugesDispos() {
+    if (!db) return {}
+    try {
+      const snap = await getDoc(doc(db, 'config', 'dispos'))
+      return (snap.exists() && snap.data().jauges) || {}
+    } catch (error) {
+      console.error('Erreur getJaugesDispos:', error)
+      return {}
+    }
+  },
+
+  async reglerJaugeDispo(creneauId, n) {
+    if (!db) throw new Error('Firebase non initialisé')
+    await setDoc(doc(db, 'config', 'dispos'), { jauges: { [creneauId]: n } }, { merge: true })
   },
 
   // ========================================

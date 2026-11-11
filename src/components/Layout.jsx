@@ -43,6 +43,7 @@ function Layout({ children, title }) {
     { path: '/dates', icon: '🗓️', label: termes?.seances || 'Dates' },
     { path: '/cadres', icon: '👔', label: termes?.cadres || 'Cadres' },
     { path: '/exports', icon: '📤', label: 'Exports' },
+    { path: '/dispos', icon: '🙋', label: 'Disponibilités' },
     { path: '/forum', icon: '💬', label: 'Forum' },
     { path: '/documents', icon: '📄', label: 'Documents' },
     { path: '/audit', icon: '📋', label: 'Audit' },

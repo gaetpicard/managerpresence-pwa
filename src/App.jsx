@@ -13,6 +13,7 @@ import CadresPage from './pages/CadresPage'
 import ParametresPage from './pages/ParametresPage'
 import ExportPage from './pages/ExportPage'
 import ForumPage from './pages/ForumPage'
+import DisposPage from './pages/DisposPage'
 import AuditPage from './pages/AuditPage'
 import DocumentsPage from './pages/DocumentsPage'
 
@@ -237,6 +238,9 @@ function App() {
           } />
           <Route path="/forum" element={
             isConnected ? <ForumPage /> : <Navigate to="/login" />
+          } />
+          <Route path="/dispos" element={
+            isConnected ? <DisposPage /> : <Navigate to="/login" />
           } />
           <Route path="/documents" element={
             isConnected ? <DocumentsPage /> : <Navigate to="/login" />
