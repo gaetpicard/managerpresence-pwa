@@ -1289,3 +1289,9 @@ select optgroup {
   color: white;
 }
 
+
+/* Onglet des dispos où il reste à répondre */
+@keyframes clignoteOrange {
+  0%, 100% { background: rgba(255, 152, 0, 0.25); }
+  50% { background: rgba(255, 152, 0, 1); }
+}

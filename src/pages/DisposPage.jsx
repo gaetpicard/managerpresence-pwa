@@ -161,11 +161,17 @@ function DisposPage() {
     background: actif ? couleur : '#fff', fontWeight: actif ? 600 : 400
   })
 
+  // Onglets où il reste à répondre (pour le cadre connecté) : ils clignotent en orange
+  const moi = generatedBy
+  const nbSeances = moi ? prochaines.reduce((n, s) => n + s.creneauxActifsIds.filter(cr => !((jourDe(s).votes || {})[cr] || {})[moi]).length, 0) : 0
+  const nbSorties = moi ? sorties.filter(so => so.jour >= idJour(minuit) && !(so.votes || {})[moi]).length : 0
+  const styleOnglet = n => n > 0 ? { animation: 'clignoteOrange 1.2s ease-in-out infinite', border: '2px solid red', fontWeight: 'bold' } : undefined
+
   return (
     <Layout title="Disponibilités">
       <div className="card" style={{ marginBottom: 'var(--spacing-md)', display: 'flex', flexWrap: 'wrap', gap: 'var(--spacing-md)', alignItems: 'center' }}>
-        <button className={`btn btn-sm ${onglet === 'prochaines' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setOnglet('prochaines')}>Prochaines {(termes?.seances || 'séances').toLowerCase()}</button>
-        <button className={`btn btn-sm ${onglet === 'sorties' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setOnglet('sorties')}>🏔 Sorties</button>
+        <button className={`btn btn-sm ${onglet === 'prochaines' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setOnglet('prochaines')} style={styleOnglet(nbSeances)}>Prochaines {(termes?.seances || 'séances').toLowerCase()}{nbSeances > 0 && ` (${nbSeances})`}</button>
+        <button className={`btn btn-sm ${onglet === 'sorties' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setOnglet('sorties')} style={styleOnglet(nbSorties)}>🏔 Sorties{nbSorties > 0 && ` (${nbSorties})`}</button>
         <button className={`btn btn-sm ${onglet === 'journal' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setOnglet('journal')}>Journal</button>
         {onglet !== 'journal' && (
           <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
