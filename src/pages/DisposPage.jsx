@@ -30,6 +30,8 @@ function DisposPage() {
   const [cadres, setCadres] = useState([])
   const [dispos, setDispos] = useState({})
   const [jauges, setJauges] = useState({})
+  const [jaugesMax, setJaugesMax] = useState({})
+  const [seanceEditee, setSeanceEditee] = useState(null) // { s, intitule, mins, maxs }
   const [forum, setForum] = useState([])
   const [pourQui, setPourQui] = useState('')
   const [onglet, setOnglet] = useState('prochaines')
@@ -51,7 +53,7 @@ function DisposPage() {
         FirebaseService.getDispos(), FirebaseService.getJaugesDispos(), FirebaseService.getForumMessages(),
         FirebaseService.getSorties()
       ])
-      setSeances(s); setCreneaux(cr); setCadres(ca); setDispos(d); setJauges(j); setForum(f); setSorties(so)
+      setSeances(s); setCreneaux(cr); setCadres(ca); setDispos(d); setJauges(j.jauges); setJaugesMax(j.jaugesMax); setForum(f); setSorties(so)
       setPourQui(prev => prev || (ca.some(c => c.id === generatedBy) ? generatedBy : ''))
     } catch (e) {
       console.error('Erreur chargement dispos:', e)
@@ -74,12 +76,20 @@ function DisposPage() {
     .filter(s => !sorties.some(so => so.annulerSalle && so.jour === idJour(s.reelle)))
   const prochaines = avecDate.filter(s => s.reelle >= minuit).sort((a, b) => a.reelle - b.reelle).slice(0, NB_SEANCES)
   const passees = avecDate.filter(s => s.reelle <= new Date()).sort((a, b) => b.reelle - a.reelle)
-  const nomCreneau = id => creneaux.find(c => c.id === id)
   const jourDe = s => dispos[idJour(s.reelle)] || {}
   const titreJour = s => `${JOURS[s.reelle.getDay()]} ${s.date}`
+  const intituleDe = s => jourDe(s).intitule ? ` — ${jourDe(s).intitule}` : ''
+  // Jauges d'une date : réglage propre à la séance, sinon celui du créneau (0 = aucune)
+  const jaugeMin = (s, crId) => (jourDe(s).jauges || {})[crId] ?? jauges[crId] ?? 0
+  const jaugeMax = (s, crId) => (jourDe(s).jaugesMax || {})[crId] ?? jaugesMax[crId] ?? 0
+  const nbOuiDe = (s, crId) => Object.values((jourDe(s).votes || {})[crId] || {}).filter(x => x.v === 'OUI').length
+  // Maximum atteint : plus de Oui pour ce cadre (sauf s'il l'a déjà dit, ou si on est admin)
+  const ouiBloque = (s, crId) => !estAdmin && jaugeMax(s, crId) > 0 && nbOuiDe(s, crId) >= jaugeMax(s, crId) &&
+    ((jourDe(s).votes || {})[crId] || {})[pourQui]?.v !== 'OUI'
 
   const voter = async (s, creneauId, v) => {
     if (!pourQui) { showToast('Choisir pour qui répondre', 'error'); return }
+    if (v === 'OUI' && ouiBloque(s, creneauId)) { showToast('Complet : le nombre maximal d\'encadrants est atteint', 'error'); return }
     const id = idJour(s.reelle)
     try {
       await FirebaseService.voterDispo(id, s.date, creneauId, pourQui, v, generatedBy || 'PWA')
@@ -112,13 +122,32 @@ function DisposPage() {
     }
   }
 
-  const reglerJauge = async (creneauId, n) => {
+  const reglerJauge = async (creneauId, n, max = false) => {
     if (n < 0) return
     try {
-      await FirebaseService.reglerJaugeDispo(creneauId, n)
-      setJauges(prev => ({ ...prev, [creneauId]: n }))
+      await FirebaseService.reglerJaugeDispo(creneauId, n, max)
+      ;(max ? setJaugesMax : setJauges)(prev => ({ ...prev, [creneauId]: n }))
     } catch (e) {
       showToast('Jauge non enregistrée', 'error')
+    }
+  }
+
+  const ouvrirEdition = s => setSeanceEditee({
+    s, intitule: jourDe(s).intitule || '',
+    mins: Object.fromEntries(s.creneauxActifsIds.map(id => [id, jaugeMin(s, id)])),
+    maxs: Object.fromEntries(s.creneauxActifsIds.map(id => [id, jaugeMax(s, id)]))
+  })
+
+  const enregistrerSeance = async () => {
+    const { s, intitule, mins, maxs } = seanceEditee
+    // Une jauge égale à celle du créneau n'est pas gardée pour la date
+    const propres = (m, defaut) => Object.fromEntries(Object.entries(m).map(([k, n]) => [k, n === (defaut[k] || 0) ? null : n]))
+    try {
+      await FirebaseService.modifierSeanceDispo(idJour(s.reelle), s.date, intitule, propres(mins, jauges), propres(maxs, jaugesMax))
+      setDispos(await FirebaseService.getDispos())
+      setSeanceEditee(null)
+    } catch (e) {
+      showToast('Séance non enregistrée', 'error')
     }
   }
 
@@ -165,14 +194,31 @@ function DisposPage() {
   const moi = generatedBy
   const nbSeances = moi ? prochaines.reduce((n, s) => n + s.creneauxActifsIds.filter(cr => !((jourDe(s).votes || {})[cr] || {})[moi]).length, 0) : 0
   const nbSorties = moi ? sorties.filter(so => so.jour >= idJour(minuit) && !(so.votes || {})[moi]).length : 0
-  const styleOnglet = n => n > 0 ? { animation: 'clignoteOrange 1.2s ease-in-out infinite', border: '2px solid red', fontWeight: 'bold' } : undefined
+  const nbSortiesPrevues = sorties.filter(so => so.jour >= idJour(minuit)).length
+  // Onglets matérialisés : liseré noir sur fond blanc, onglet ouvert en blanc sur noir
+  const styleOnglet = (n, actif) => n > 0
+    ? { animation: 'clignoteOrange 1.2s ease-in-out infinite', border: '2px solid red', fontWeight: 'bold', color: '#000' }
+    : { border: '1px solid #000', background: actif ? '#000' : '#fff', color: actif ? '#fff' : '#000' }
+  const pastille = { display: 'inline-block', minWidth: 16, padding: '0 4px', marginLeft: 4, borderRadius: 8, background: '#1565c0', color: '#fff', fontSize: 10, fontWeight: 'bold', lineHeight: '16px', textAlign: 'center' }
+  const texteJauge = (oui, ideal, max) => {
+    const base = ideal > 0 ? `${oui}/${ideal} encadrant(s)` : `${oui} oui`
+    return max > 0 && oui >= max ? `${base} · 🔒 Complet` : max > 0 ? `${base} · max ${max}` : base
+  }
+  const compteur = (libelle, n, onChange) => (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 0' }}>
+      <span style={{ flex: 1 }}>{libelle}</span>
+      <button className="btn btn-secondary btn-sm" onClick={() => n > 0 && onChange(n - 1)}>−</button>
+      <strong>{n > 0 ? n : '—'}</strong>
+      <button className="btn btn-secondary btn-sm" onClick={() => onChange(n + 1)}>+</button>
+    </div>
+  )
 
   return (
     <Layout title="Disponibilités">
       <div className="card" style={{ marginBottom: 'var(--spacing-md)', display: 'flex', flexWrap: 'wrap', gap: 'var(--spacing-md)', alignItems: 'center' }}>
-        <button className={`btn btn-sm ${onglet === 'prochaines' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setOnglet('prochaines')} style={styleOnglet(nbSeances)}>Prochaines {(termes?.seances || 'séances').toLowerCase()}{nbSeances > 0 && ` (${nbSeances})`}</button>
-        <button className={`btn btn-sm ${onglet === 'sorties' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setOnglet('sorties')} style={styleOnglet(nbSorties)}>🏔 Sorties{nbSorties > 0 && ` (${nbSorties})`}</button>
-        <button className={`btn btn-sm ${onglet === 'journal' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setOnglet('journal')}>Journal</button>
+        <button className="btn btn-sm" onClick={() => setOnglet('prochaines')} style={styleOnglet(nbSeances, onglet === 'prochaines')}>Prochaines {(termes?.seances || 'séances').toLowerCase()}{nbSeances > 0 && ` (${nbSeances})`}</button>
+        <button className="btn btn-sm" onClick={() => setOnglet('sorties')} style={styleOnglet(nbSorties, onglet === 'sorties')}>🏔 Sorties{nbSorties > 0 && ` (${nbSorties})`}{nbSorties === 0 && nbSortiesPrevues > 0 && <span style={pastille}>{nbSortiesPrevues}</span>}</button>
+        <button className="btn btn-sm" onClick={() => setOnglet('journal')} style={styleOnglet(0, onglet === 'journal')}>Journal</button>
         {onglet !== 'journal' && (
           <label style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             Répondre pour :
@@ -188,14 +234,13 @@ function DisposPage() {
 
       {estAdmin && showJauges && (
         <div className="card" style={{ marginBottom: 'var(--spacing-md)' }}>
-          <h3 className="card-title">Encadrants idéaux par {(termes?.creneau || 'créneau').toLowerCase()}</h3>
-          <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>0 = pas de jauge (jamais en orange).</p>
+          <h3 className="card-title">Encadrants par {(termes?.creneau || 'créneau').toLowerCase()}</h3>
+          <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>Idéal : en orange tant qu'il n'est pas atteint. Maximum : plus de « Oui » possibles une fois atteint. — = aucune. Chaque séance peut avoir ses propres réglages (✏️).</p>
           {creneaux.map(cr => (
-            <div key={cr.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0' }}>
-              <span style={{ flex: 1 }}>{cr.nom}</span>
-              <button className="btn btn-secondary btn-sm" onClick={() => reglerJauge(cr.id, (jauges[cr.id] || 0) - 1)}>−</button>
-              <strong>{jauges[cr.id] || 0}</strong>
-              <button className="btn btn-secondary btn-sm" onClick={() => reglerJauge(cr.id, (jauges[cr.id] || 0) + 1)}>+</button>
+            <div key={cr.id} style={{ padding: '4px 0' }}>
+              <strong>{cr.nom} {cr.heureDebut}-{cr.heureFin}</strong>
+              {compteur('Idéal', jauges[cr.id] || 0, n => reglerJauge(cr.id, n))}
+              {compteur('Maximum', jaugesMax[cr.id] || 0, n => reglerJauge(cr.id, n, true))}
             </div>
           ))}
         </div>
@@ -205,34 +250,39 @@ function DisposPage() {
         ? <div className="empty-state"><div className="empty-state-title">Aucune séance à venir</div></div>
         : prochaines.map(s => {
           const jour = jourDe(s)
-          const alerte = s.creneauxActifsIds.some(id => (jauges[id] || 0) > 0 &&
-            Object.values((jour.votes || {})[id] || {}).filter(x => x.v === 'OUI').length < jauges[id])
+          const alerte = s.creneauxActifsIds.some(id => jaugeMin(s, id) > 0 && nbOuiDe(s, id) < jaugeMin(s, id))
           const fil = filDe(s.date)
           const reponses = reponsesDe(fil)
           return (
             <div key={s.id} className="card" style={{ marginBottom: 'var(--spacing-md)', border: alerte ? '3px solid #e65100' : undefined }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <strong>{titreJour(s)}</strong>
+                <strong style={{ flex: 1 }}>{titreJour(s)}{intituleDe(s)}
+                  {estAdmin && <span style={{ cursor: 'pointer', marginLeft: 8 }} title="Modifier la séance" onClick={() => ouvrirEdition(s)}>✏️</span>}
+                </strong>
                 <button className="btn btn-secondary btn-sm" onClick={() => setOuvert(ouvert === s.date ? null : s.date)}>
                   💬 {reponses.length || 'Discuter'}
                 </button>
               </div>
-              {s.creneauxActifsIds.map(id => nomCreneau(id)).filter(Boolean).map(cr => {
+              {creneaux.filter(c => s.creneauxActifsIds.includes(c.id)).map(cr => {
                 const votes = (jour.votes || {})[cr.id] || {}
                 const oui = Object.values(votes).filter(x => x.v === 'OUI').length
-                const jauge = jauges[cr.id] || 0
+                const jauge = jaugeMin(s, cr.id)
+                const max = jaugeMax(s, cr.id)
                 const sous = jauge > 0 && oui < jauge
+                const plein = max > 0 && oui >= max
+                const bloque = ouiBloque(s, cr.id)
                 const monVote = votes[pourQui]
                 const sansReponse = cadres.map(c => c.id).filter(n => !votes[n]).sort()
                 return (
                   <div key={cr.id} style={{ marginTop: 10, ...(sous ? { border: '2px solid #e65100', background: '#ffe0b2', borderRadius: 8, padding: 6 } : {}) }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                       <span>{cr.nom} {cr.heureDebut}-{cr.heureFin}</span>
-                      <strong style={{ color: sous ? '#e65100' : '#2e7d32' }}>{jauge > 0 ? `${oui}/${jauge} encadrant(s)` : `${oui} oui`}</strong>
+                      <strong style={{ color: plein ? '#c62828' : sous ? '#e65100' : '#2e7d32' }}>{texteJauge(oui, jauge, max)}</strong>
                     </div>
                     <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
                       {CHOIX.map(c => (
-                        <span key={c.v} style={puce(monVote?.v === c.v, c.couleur)} onClick={() => voter(s, cr.id, c.v)}>{c.label}</span>
+                        <span key={c.v} style={c.v === 'OUI' && bloque ? { ...puce(false), background: '#eee', color: '#888', cursor: 'not-allowed' } : puce(monVote?.v === c.v, c.couleur)}
+                          onClick={() => voter(s, cr.id, c.v)}>{c.label}</span>
                       ))}
                     </div>
                     {monVote?.par && monVote.par !== pourQui && <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>saisi par {monVote.par}</div>}
@@ -282,6 +332,7 @@ function DisposPage() {
           creneaux={creneaux}
           pourQui={pourQui}
           auteur={generatedBy || 'PWA'}
+          estAdmin={estAdmin}
           dateEnJour={jjmm => {
             const d = dateReelle(jjmm, debutSaison)
             if (!d || `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}` !== jjmm) return null
@@ -316,8 +367,8 @@ function DisposPage() {
               const jour = jourDe(s)
               return (
                 <div key={s.id} style={{ marginBottom: 8 }}>
-                  <strong>{titreJour(s)}</strong>
-                  {s.creneauxActifsIds.map(id => nomCreneau(id)).filter(Boolean).map(cr => {
+                  <strong>{titreJour(s)}{intituleDe(s)}</strong>
+                  {creneaux.filter(c => s.creneauxActifsIds.includes(c.id)).map(cr => {
                     const coches = presentsDe(s, cr.id)
                     const votes = (jour.votes || {})[cr.id] || {}
                     const ouiSeuls = Object.keys(votes).filter(n => votes[n].v === 'OUI' && !coches.includes(n))
@@ -330,6 +381,32 @@ function DisposPage() {
           </div>
         )
       })()}
+
+      {seanceEditee && (
+        <div className="modal-overlay" onClick={() => setSeanceEditee(null)}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxHeight: '90vh', overflowY: 'auto' }}>
+            <div className="modal-header">
+              <h2 className="modal-title">✏️ Modifier la séance — {titreJour(seanceEditee.s)}</h2>
+              <button className="modal-close" onClick={() => setSeanceEditee(null)}>×</button>
+            </div>
+            <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <input className="form-input" placeholder="Intitulé (facultatif)" value={seanceEditee.intitule}
+                onChange={e => setSeanceEditee({ ...seanceEditee, intitule: e.target.value })} />
+              {creneaux.filter(c => seanceEditee.s.creneauxActifsIds.includes(c.id)).map(cr => (
+                <div key={cr.id}>
+                  <strong>{cr.nom} {cr.heureDebut}-{cr.heureFin}</strong>
+                  {compteur('Idéal', seanceEditee.mins[cr.id] || 0, n => setSeanceEditee({ ...seanceEditee, mins: { ...seanceEditee.mins, [cr.id]: n } }))}
+                  {compteur('Maximum', seanceEditee.maxs[cr.id] || 0, n => setSeanceEditee({ ...seanceEditee, maxs: { ...seanceEditee.maxs, [cr.id]: n } }))}
+                </div>
+              ))}
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setSeanceEditee(null)}>Annuler</button>
+                <button className="btn btn-primary" style={{ flex: 1 }} onClick={enregistrerSeance}>Enregistrer</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {toast && (
         <div className="toast-container">

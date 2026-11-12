@@ -77,11 +77,8 @@ function MembresPage() {
   // Liste unique des groupes
   const uniqueGroupes = [...new Set(eleves.map(e => e.groupe).filter(Boolean))].sort()
 
-  // Créneaux dans l'ordre de leur nom, en comparant les nombres comme des
-  // nombres : sans cela « G10 » se placerait avant « G2 ».
-  const creneauxTries = [...creneaux].sort((a, b) =>
-    (a.nom || '').localeCompare(b.nom || '', 'fr', { numeric: true })
-  )
+  // Créneaux déjà dans l'ordre chronologique (voir getCreneaux)
+  const creneauxTries = creneaux
 
   const handleSort = (field) => {
     if (sortBy === field) {

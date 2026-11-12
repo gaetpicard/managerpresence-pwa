@@ -19,9 +19,9 @@ const POINTAGES = [
 ]
 const JOURS = ['Dim.', 'Lun.', 'Mar.', 'Mer.', 'Jeu.', 'Ven.', 'Sam.']
 const pad = n => String(n).padStart(2, '0')
-const VIDE = { titre: '', date: '', heureDebut: '09:00', heureFin: '17:00', lieu: '', jauge: 0, eleves: [], cadres: [], annulerSalle: false }
+const VIDE = { titre: '', date: '', heureDebut: '09:00', heureFin: '17:00', lieu: '', jauge: 0, jaugeMax: 0, eleves: [], cadres: [], annulerSalle: false }
 
-function SortiesOnglet({ sorties, recharger, cadres, creneaux, pourQui, auteur, dateEnJour, datesProposees, showToast }) {
+function SortiesOnglet({ sorties, recharger, cadres, creneaux, pourQui, auteur, estAdmin, dateEnJour, datesProposees, showToast }) {
   const [eleves, setEleves] = useState([])
   const [edition, setEdition] = useState(null)
   const [appel, setAppel] = useState(null)
@@ -38,6 +38,15 @@ function SortiesOnglet({ sorties, recharger, cadres, creneaux, pourQui, auteur, 
   const nomEleve = id => { const e = eleves.find(x => x.id === id); return e ? `${e.prenom} ${e.nom}` : id }
   const nbOui = s => Object.values(s.votes || {}).filter(x => x.v === 'OUI').length
   const sousJauge = s => (s.jauge || 0) > 0 && nbOui(s) < s.jauge
+  const plein = s => (s.jaugeMax || 0) > 0 && nbOui(s) >= s.jaugeMax
+  // Maximum atteint : plus de Oui pour ce cadre (sauf s'il l'a déjà dit, ou si on est admin)
+  const ouiBloque = s => !estAdmin && plein(s) && (s.votes || {})[pourQui]?.v !== 'OUI'
+  // Organisation et réglages : admin ou auteur de la sortie
+  const modifiable = s => estAdmin || (!!s.creePar && s.creePar === auteur)
+  const texteJauge = s => {
+    const base = s.jauge > 0 ? `${nbOui(s)}/${s.jauge} encadrant(s)` : `${nbOui(s)} oui`
+    return plein(s) ? `${base} · 🔒 Complet` : s.jaugeMax > 0 ? `${base} · max ${s.jaugeMax}` : base
+  }
 
   const puce = (actif, couleur) => ({
     padding: '4px 12px', borderRadius: 12, cursor: 'pointer', fontSize: 13,
@@ -47,12 +56,14 @@ function SortiesOnglet({ sorties, recharger, cadres, creneaux, pourQui, auteur, 
 
   const voter = async (s, v) => {
     if (!pourQui) { showToast('Choisir pour qui répondre', 'error'); return }
+    if (v === 'OUI' && ouiBloque(s)) { showToast('Complet : le nombre maximal d\'encadrants est atteint', 'error'); return }
     try { await FirebaseService.voterSortie(s.id, pourQui, v, auteur); await recharger() }
     catch (e) { showToast('Vote non enregistré', 'error') }
   }
 
   const enregistrer = async () => {
     const e = edition
+    if (e.id && !modifiable(e)) { showToast('Seul l\'auteur de la sortie ou un admin peut la modifier', 'error'); return }
     if (!e.titre.trim()) { showToast('Indique un titre', 'error'); return }
     const jour = dateEnJour(e.date)
     if (!/^\d{2}\/\d{2}$/.test(e.date) || !jour) { showToast('Date invalide (JJ/MM)', 'error'); return }
@@ -102,13 +113,13 @@ function SortiesOnglet({ sorties, recharger, cadres, creneaux, pourQui, auteur, 
           <div key={s.id} className="card" style={{ marginBottom: 'var(--spacing-md)', border: sousJauge(s) ? '3px solid #e65100' : undefined, background: sousJauge(s) ? '#ffe0b2' : undefined }}>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <strong>🏔 {s.titre}</strong>
-              <strong style={{ color: sousJauge(s) ? '#e65100' : '#2e7d32' }}>{s.jauge > 0 ? `${nbOui(s)}/${s.jauge} encadrant(s)` : `${nbOui(s)} oui`}</strong>
+              <strong style={{ color: plein(s) ? '#c62828' : sousJauge(s) ? '#e65100' : '#2e7d32' }}>{texteJauge(s)}</strong>
             </div>
             <div>{titreJour(s)} · 🕘 {s.heureDebut}-{s.heureFin}{s.lieu ? ` · 📍 ${s.lieu}` : ''}</div>
             {s.annulerSalle && <div style={{ color: '#c62828', fontWeight: 600, fontSize: 13 }}>🚫 Séances en salle annulées ce jour</div>}
             <div style={{ fontSize: 13 }}>Encadrants prévus : {[...(s.cadres || [])].sort().join(', ') || '—'} · {(s.eleves || []).length} inscrit(s)</div>
             <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
-              {CHOIX.map(c => <span key={c.v} style={puce(monVote?.v === c.v, c.couleur)} onClick={() => voter(s, c.v)}>{c.label}</span>)}
+              {CHOIX.map(c => <span key={c.v} style={c.v === 'OUI' && ouiBloque(s) ? { ...puce(false), background: '#eee', color: '#888', cursor: 'not-allowed' } : puce(monVote?.v === c.v, c.couleur)} onClick={() => voter(s, c.v)}>{c.label}</span>)}
             </div>
             <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2 }}>
               {CHOIX.map(c => {
@@ -118,8 +129,8 @@ function SortiesOnglet({ sorties, recharger, cadres, creneaux, pourQui, auteur, 
             </div>
             <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
               <button className="btn btn-secondary btn-sm" onClick={() => ouvrirAppel(s)}>📋 Appel{s.valide ? ' ✓' : ''}</button>
-              <button className="btn btn-secondary btn-sm" onClick={() => { setRecherche(''); setEdition({ ...VIDE, ...s }) }}>✏ Modifier</button>
-              <button className="btn btn-secondary btn-sm" onClick={() => supprimer(s)}>🗑</button>
+              {modifiable(s) && <button className="btn btn-secondary btn-sm" onClick={() => { setRecherche(''); setEdition({ ...VIDE, ...s }) }}>✏ Modifier</button>}
+              {modifiable(s) && <button className="btn btn-secondary btn-sm" onClick={() => supprimer(s)}>🗑</button>}
             </div>
           </div>
         )
@@ -166,6 +177,12 @@ function SortiesOnglet({ sorties, recharger, cadres, creneaux, pourQui, auteur, 
                 <button className="btn btn-secondary btn-sm" onClick={() => setEdition({ ...edition, jauge: Math.max(0, (edition.jauge || 0) - 1) })}>−</button>
                 <strong>{edition.jauge || 0}</strong>
                 <button className="btn btn-secondary btn-sm" onClick={() => setEdition({ ...edition, jauge: (edition.jauge || 0) + 1 })}>+</button>
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                Encadrants maximum
+                <button className="btn btn-secondary btn-sm" onClick={() => setEdition({ ...edition, jaugeMax: Math.max(0, (edition.jaugeMax || 0) - 1) })}>−</button>
+                <strong>{edition.jaugeMax > 0 ? edition.jaugeMax : '—'}</strong>
+                <button className="btn btn-secondary btn-sm" onClick={() => setEdition({ ...edition, jaugeMax: (edition.jaugeMax || 0) + 1 })}>+</button>
               </label>
               <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <input type="checkbox" checked={!!edition.annulerSalle} onChange={e => setEdition({ ...edition, annulerSalle: e.target.checked })} />

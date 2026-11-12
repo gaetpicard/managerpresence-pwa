@@ -4,7 +4,7 @@
  */
 
 import { initializeApp, deleteApp, getApps } from 'firebase/app'
-import { getFirestore, collection, getDocs, doc, getDoc, setDoc, updateDoc, deleteDoc, query, where, orderBy, arrayUnion, arrayRemove, FieldPath } from 'firebase/firestore'
+import { getFirestore, collection, getDocs, doc, getDoc, setDoc, updateDoc, deleteDoc, query, where, orderBy, arrayUnion, arrayRemove, FieldPath, deleteField } from 'firebase/firestore'
 import { getAuth, signInAnonymously, signOut } from 'firebase/auth'
 import { initializeAppCheck, ReCaptchaEnterpriseProvider } from 'firebase/app-check'
 import { genererDates } from './CalendrierScolaire'
@@ -439,7 +439,11 @@ export const FirebaseService = {
     if (!db) return []
     try {
       const snapshot = await getDocs(collection(db, 'creneaux'))
+      // Ordre chronologique : heure de début, puis heure de fin, puis nom
+      const minutes = (h) => { const [hh, mm] = String(h || '').split(':'); const n = parseInt(hh, 10); return isNaN(n) ? 99 * 60 : n * 60 + (parseInt(mm, 10) || 0) }
       return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
+        .sort((a, b) => minutes(a.heureDebut) - minutes(b.heureDebut) || minutes(a.heureFin) - minutes(b.heureFin) ||
+          (a.nom || '').localeCompare(b.nom || '', 'fr', { numeric: true }))
     } catch (error) {
       console.error('Erreur getCreneaux:', error)
       return []
@@ -744,17 +748,26 @@ export const FirebaseService = {
   async getJaugesDispos() {
     if (!db) return {}
     try {
+      // { jauges: idéal par créneau, jaugesMax: maximum par créneau }
       const snap = await getDoc(doc(db, 'config', 'dispos'))
-      return (snap.exists() && snap.data().jauges) || {}
+      const d = snap.exists() ? snap.data() : {}
+      return { jauges: d.jauges || {}, jaugesMax: d.jaugesMax || {} }
     } catch (error) {
       console.error('Erreur getJaugesDispos:', error)
       return {}
     }
   },
 
-  async reglerJaugeDispo(creneauId, n) {
+  async reglerJaugeDispo(creneauId, n, max = false) {
     if (!db) throw new Error('Firebase non initialisé')
-    await setDoc(doc(db, 'config', 'dispos'), { jauges: { [creneauId]: n } }, { merge: true })
+    await setDoc(doc(db, 'config', 'dispos'), { [max ? 'jaugesMax' : 'jauges']: { [creneauId]: n } }, { merge: true })
+  },
+
+  /** Réglages propres à une séance (admin) : intitulé et jauges de cette date ; null = celle du créneau. */
+  async modifierSeanceDispo(idJour, date, intitule, mins, maxs) {
+    if (!db) throw new Error('Firebase non initialisé')
+    const propres = m => Object.fromEntries(Object.entries(m).map(([k, n]) => [k, n === null ? deleteField() : n]))
+    await setDoc(doc(db, 'dispos', idJour), { date, intitule: intitule.trim(), jauges: propres(mins), jaugesMax: propres(maxs) }, { merge: true })
   },
 
   // ========================================
@@ -778,7 +791,7 @@ export const FirebaseService = {
     const champs = {
       titre: sortie.titre, date: sortie.date, jour: sortie.jour,
       heureDebut: sortie.heureDebut, heureFin: sortie.heureFin, lieu: sortie.lieu,
-      jauge: sortie.jauge || 0, eleves: sortie.eleves || [], cadres: sortie.cadres || [],
+      jauge: sortie.jauge || 0, jaugeMax: sortie.jaugeMax || 0, eleves: sortie.eleves || [], cadres: sortie.cadres || [],
       annulerSalle: !!sortie.annulerSalle
     }
     if (sortie.id) {
