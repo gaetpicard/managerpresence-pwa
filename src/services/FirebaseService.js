@@ -791,7 +791,7 @@ export const FirebaseService = {
     const champs = {
       titre: sortie.titre, date: sortie.date, jour: sortie.jour,
       heureDebut: sortie.heureDebut, heureFin: sortie.heureFin, lieu: sortie.lieu,
-      jauge: sortie.jauge || 0, jaugeMax: sortie.jaugeMax || 0, eleves: sortie.eleves || [], cadres: sortie.cadres || [],
+      jauge: sortie.jauge || 0, jaugeMax: sortie.jaugeMax || 0, eleves: sortie.eleves || [], nonViennent: sortie.nonViennent || [], cadres: sortie.cadres || [],
       annulerSalle: !!sortie.annulerSalle
     }
     if (sortie.id) {

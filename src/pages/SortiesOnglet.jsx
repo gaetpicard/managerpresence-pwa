@@ -19,13 +19,14 @@ const POINTAGES = [
 ]
 const JOURS = ['Dim.', 'Lun.', 'Mar.', 'Mer.', 'Jeu.', 'Ven.', 'Sam.']
 const pad = n => String(n).padStart(2, '0')
-const VIDE = { titre: '', date: '', heureDebut: '09:00', heureFin: '17:00', lieu: '', jauge: 0, jaugeMax: 0, eleves: [], cadres: [], annulerSalle: false }
+const VIDE = { titre: '', date: '', heureDebut: '09:00', heureFin: '17:00', lieu: '', jauge: 0, jaugeMax: 0, eleves: [], nonViennent: [], cadres: [], annulerSalle: false }
 
 function SortiesOnglet({ sorties, recharger, cadres, creneaux, pourQui, auteur, estAdmin, dateEnJour, datesProposees, showToast }) {
   const [eleves, setEleves] = useState([])
   const [edition, setEdition] = useState(null)
   const [appel, setAppel] = useState(null)
   const [recherche, setRecherche] = useState('')
+  const [seulementSansReponse, setSeulementSansReponse] = useState(false)
   const [referent, setReferent] = useState('')
   const [presentsCadres, setPresentsCadres] = useState([])
 
@@ -36,6 +37,12 @@ function SortiesOnglet({ sorties, recharger, cadres, creneaux, pourQui, auteur, 
   const passees = sorties.filter(s => s.jour < aujourdhui).sort((a, b) => (b.jour + b.heureDebut).localeCompare(a.jour + a.heureDebut))
   const titreJour = s => { const d = new Date(s.jour); return `${isNaN(d) ? '' : JOURS[d.getDay()]} ${s.date}` }
   const nomEleve = id => { const e = eleves.find(x => x.id === id); return e ? `${e.prenom} ${e.nom}` : id }
+  // Élèves encore dans l'appli (un élève supprimé laisse son identifiant dans les anciennes sorties)
+  const existants = ids => (ids || []).filter(id => eleves.some(e => e.id === id))
+  const resume = s => {
+    const oui = existants(s.eleves).length, non = existants(s.nonViennent).length
+    return `✅ ${oui} viennent · ❌ ${non} ne viennent pas · ❓ ${Math.max(0, eleves.length - oui - non)} sans réponse`
+  }
   const nbOui = s => Object.values(s.votes || {}).filter(x => x.v === 'OUI').length
   const sousJauge = s => (s.jauge || 0) > 0 && nbOui(s) < s.jauge
   const plein = s => (s.jaugeMax || 0) > 0 && nbOui(s) >= s.jaugeMax
@@ -69,7 +76,7 @@ function SortiesOnglet({ sorties, recharger, cadres, creneaux, pourQui, auteur, 
     if (!/^\d{2}\/\d{2}$/.test(e.date) || !jour) { showToast('Date invalide (JJ/MM)', 'error'); return }
     if (!/^\d{2}:\d{2}$/.test(e.heureDebut) || !/^\d{2}:\d{2}$/.test(e.heureFin)) { showToast('Heures invalides (HH:MM)', 'error'); return }
     try {
-      await FirebaseService.enregistrerSortie({ ...e, titre: e.titre.trim(), lieu: e.lieu.trim(), jour }, auteur)
+      await FirebaseService.enregistrerSortie({ ...e, titre: e.titre.trim(), lieu: e.lieu.trim(), jour, eleves: existants(e.eleves), nonViennent: existants(e.nonViennent) }, auteur)
       setEdition(null)
       await recharger()
     } catch (err) { showToast('Sortie non enregistrée', 'error') }
@@ -93,7 +100,7 @@ function SortiesOnglet({ sorties, recharger, cadres, creneaux, pourQui, auteur, 
   }
 
   const validerAppel = async s => {
-    const toutPointe = (s.eleves || []).every(id => (s.presences || {})[id])
+    const toutPointe = existants(s.eleves).every(id => (s.presences || {})[id])
     if (!toutPointe || !referent) { showToast('Toutes les présences doivent être pointées et un cadre référent choisi', 'error'); return }
     try { await FirebaseService.validerSortie(s.id, referent, presentsCadres); setAppel(null); await recharger() }
     catch (e) { showToast('Validation impossible', 'error') }
@@ -117,7 +124,8 @@ function SortiesOnglet({ sorties, recharger, cadres, creneaux, pourQui, auteur, 
             </div>
             <div>{titreJour(s)} · 🕘 {s.heureDebut}-{s.heureFin}{s.lieu ? ` · 📍 ${s.lieu}` : ''}</div>
             {s.annulerSalle && <div style={{ color: '#c62828', fontWeight: 600, fontSize: 13 }}>🚫 Séances en salle annulées ce jour</div>}
-            <div style={{ fontSize: 13 }}>Encadrants prévus : {[...(s.cadres || [])].sort().join(', ') || '—'} · {(s.eleves || []).length} inscrit(s)</div>
+            <div style={{ fontSize: 13 }}>Encadrants prévus : {[...(s.cadres || [])].sort().join(', ') || '—'}</div>
+            <div style={{ fontSize: 13 }}>{resume(s)}</div>
             <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
               {CHOIX.map(c => <span key={c.v} style={c.v === 'OUI' && ouiBloque(s) ? { ...puce(false), background: '#eee', color: '#888', cursor: 'not-allowed' } : puce(monVote?.v === c.v, c.couleur)} onClick={() => voter(s, c.v)}>{c.label}</span>)}
             </div>
@@ -197,23 +205,43 @@ function SortiesOnglet({ sorties, recharger, cadres, creneaux, pourQui, auteur, 
                   </label>
                 ))}
               </div>
-              <strong>Élèves inscrits ({(edition.eleves || []).length})</strong>
+              <strong>Participants</strong>
+              <div style={{ fontSize: 13 }}>{resume(edition)}</div>
               <input className="form-input" placeholder="Rechercher un élève" value={recherche} onChange={e => setRecherche(e.target.value)} />
-              {creneaux.map(cr => {
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+                <input type="checkbox" checked={seulementSansReponse} onChange={() => setSeulementSansReponse(!seulementSansReponse)} />
+                ❓ Sans réponse seulement
+              </label>
+              {[...creneaux.map(cr => ({ cle: cr.id, nom: cr.nom, membres: eleves.filter(e => (e.creneauxIds || []).includes(cr.id)) })),
+                { cle: '_aucun', nom: 'Sans créneau', membres: eleves.filter(e => !(e.creneauxIds || []).some(id => creneaux.some(cr => cr.id === id))) }
+              ].map(g => {
                 const f = recherche.trim().toLowerCase()
-                const liste = eleves.filter(e => (e.creneauxIds || []).includes(cr.id))
+                const viennent = edition.eleves || [], refus = edition.nonViennent || []
+                const liste = g.membres
                   .filter(e => !f || `${e.prenom} ${e.nom}`.toLowerCase().includes(f))
+                  .filter(e => !seulementSansReponse || (!viennent.includes(e.id) && !refus.includes(e.id)))
                   .sort((a, b) => (a.prenom || '').localeCompare(b.prenom || ''))
                 if (liste.length === 0) return null
+                // Un second appui sur le choix déjà fait remet l'élève « sans réponse »
+                const repondre = (id, oui) => {
+                  const deja = oui ? viennent.includes(id) : refus.includes(id)
+                  const v = viennent.filter(x => x !== id), n = refus.filter(x => x !== id)
+                  if (!deja) (oui ? v : n).push(id)
+                  setEdition({ ...edition, eleves: v, nonViennent: n })
+                }
                 return (
-                  <div key={cr.id}>
-                    <div style={{ color: 'var(--info)', fontWeight: 600, fontSize: 13 }}>{cr.nom}</div>
-                    {liste.map(e => (
-                      <label key={e.id} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <input type="checkbox" checked={(edition.eleves || []).includes(e.id)} onChange={() => setEdition({ ...edition, eleves: basculer(edition.eleves || [], e.id) })} />
-                        {e.prenom} {e.nom}
-                      </label>
-                    ))}
+                  <div key={g.cle}>
+                    <div style={{ color: 'var(--info)', fontWeight: 600, fontSize: 13 }}>{g.nom}</div>
+                    {liste.map(e => {
+                      const vient = viennent.includes(e.id), vientPas = refus.includes(e.id)
+                      return (
+                        <div key={e.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '2px 4px', borderRadius: 6, background: !vient && !vientPas ? '#ffe0b2' : undefined }}>
+                          <span style={{ flex: 1 }}>{e.prenom} {e.nom}</span>
+                          <span style={puce(vient, '#c8e6c9')} onClick={() => repondre(e.id, true)}>✅</span>
+                          <span style={puce(vientPas, '#ffcdd2')} onClick={() => repondre(e.id, false)}>❌</span>
+                        </div>
+                      )
+                    })}
                   </div>
                 )
               })}
@@ -235,7 +263,7 @@ function SortiesOnglet({ sorties, recharger, cadres, creneaux, pourQui, auteur, 
             </div>
             <div className="modal-body">
               {sortieAppel.valide && <p style={{ color: '#2e7d32' }}>✓ Appel validé par {sortieAppel.cadreReferent}</p>}
-              {[...(sortieAppel.eleves || [])].sort((a, b) => nomEleve(a).localeCompare(nomEleve(b))).map(id => (
+              {existants(sortieAppel.eleves).sort((a, b) => nomEleve(a).localeCompare(nomEleve(b))).map(id => (
                 <div key={id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 0' }}>
                   <span style={{ flex: 1 }}>{nomEleve(id)}</span>
                   {POINTAGES.map(p => (
