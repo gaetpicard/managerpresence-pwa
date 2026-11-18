@@ -5,6 +5,7 @@ import { FirebaseService } from '../services/FirebaseService'
 import { analyserCsv, fusionner } from '../services/ImportCsv'
 import { ouvrirMessagerie } from '../services/Messagerie'
 import { useApp } from '../App'
+import SynchroGoogle from './SynchroGoogle'
 
 function MembresPage() {
   const navigate = useNavigate()
@@ -42,6 +43,7 @@ function MembresPage() {
   const [importEnCours, setImportEnCours] = useState(false)
   const [importProgression, setImportProgression] = useState(0)
   const [aideImport, setAideImport] = useState(false)
+  const [synchroGoogle, setSynchroGoogle] = useState(false)
 
   useEffect(() => {
     loadData()
@@ -489,6 +491,9 @@ function MembresPage() {
           <button className="btn btn-secondary btn-sm" onClick={() => fileInputRef.current?.click()}>
             📥 Importer
           </button>
+          <button className="btn btn-secondary btn-sm" onClick={() => setSynchroGoogle(true)}>
+            🔄 Google Contacts
+          </button>
           <input
             ref={fileInputRef}
             type="file"
@@ -799,6 +804,15 @@ function MembresPage() {
       </p>
 
       {/* Modal ajout/édition */}
+      {synchroGoogle && (
+        <SynchroGoogle
+          eleves={eleves}
+          showToast={showToast}
+          onFermer={() => setSynchroGoogle(false)}
+          onTermine={async () => { setSynchroGoogle(false); await loadData() }}
+        />
+      )}
+
       {/* Aperçu avant import CSV */}
       {importData && (
         <div className="modal-overlay" onClick={() => !importEnCours && setImportData(null)}>

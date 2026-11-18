@@ -924,6 +924,26 @@ export const FirebaseService = {
     }
   },
 
+  /**
+   * Réglages de la synchro Google Contacts (config/googleContacts) :
+   * compte Google de la structure et libellés retenus.
+   */
+  async getGoogleContactsConfig() {
+    if (!db) return {}
+    try {
+      const snap = await getDoc(doc(db, 'config', 'googleContacts'))
+      return snap.exists() ? snap.data() : {}
+    } catch (error) {
+      console.error('Erreur getGoogleContactsConfig:', error)
+      return {}
+    }
+  },
+
+  async updateGoogleContactsConfig(data) {
+    if (!db) throw new Error('Firebase non initialisé')
+    await setDoc(doc(db, 'config', 'googleContacts'), data, { merge: true })
+  },
+
   // ========================================
   // SÉANCES (DATES)
   // ========================================
