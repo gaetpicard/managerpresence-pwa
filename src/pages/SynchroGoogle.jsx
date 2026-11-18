@@ -128,7 +128,14 @@ function SynchroGoogle({ eleves, onFermer, onTermine, showToast }) {
     onTermine()
   }
 
-  const ligneChangement = (ch) => {
+  const ligneChangement = (ch) => <>
+    {texteChangement(ch)}
+    {ch.alerte && <div style={{ fontSize: 13, fontWeight: 600, color: ch.alerte.startsWith('✔') ? '#2e7d32' : '#e65100' }}>{ch.alerte}</div>}
+  </>
+
+  const texteChangement = (ch) => {
+    if (ch.type === 'note') return <>📞 {ch.numero} — inchangé</>
+    if (ch.type === 'retirer' && ch.alerte) return <span style={{ color: '#c62828' }}>🗑 Retirer {ch.numero}{ch.qui ? ` (${ch.qui})` : ''}</span>
     if (ch.type === 'email') return <>✉️ E-mail : <s>{ch.ancien || 'vide'}</s> → <strong>{ch.nouveau}</strong></>
     if (ch.type === 'qui') return <>📞 {ch.numero} — Qui ? <s>{ch.ancien || 'vide'}</s> → <strong>{ch.nouveau}</strong></>
     if (ch.type === 'ajouter') return <>➕ Ajouter {ch.numero}{ch.qui ? ` (${ch.qui})` : ''}</>
@@ -194,6 +201,7 @@ function SynchroGoogle({ eleves, onFermer, onTermine, showToast }) {
                   {f.changements.map(ch => (
                     <label key={ch.cle} style={{ display: 'flex', gap: 8, alignItems: 'center', marginLeft: 24, cursor: 'pointer' }}>
                       <input type="checkbox" checked={ch.actif} disabled={!f.choisie || !!occupe}
+                             style={{ visibility: ch.type === 'note' ? 'hidden' : 'visible' }}
                              onChange={() => basculerChangement(i, ch.cle)} />
                       <span>{ligneChangement(ch)}</span>
                     </label>

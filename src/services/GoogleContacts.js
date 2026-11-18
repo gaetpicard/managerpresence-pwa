@@ -126,6 +126,63 @@ export async function lireContacts(jeton) {
 
 // ── Comparaison ─────────────────────────────────────────────────────────
 
+/** Deux numéros qui ne diffèrent que d'un chiffre, ou de deux chiffres voisins inversés : faute de frappe probable. */
+export function presqueIdentiques(a, b) {
+  if (!a || !b || a === b || a.length !== b.length) return false
+  const diff = []
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) diff.push(i)
+  if (diff.length === 1) return true
+  return diff.length === 2 && diff[1] === diff[0] + 1 && a[diff[0]] === b[diff[1]] && a[diff[1]] === b[diff[0]]
+}
+
+const nomContact = (c) => (c.affiche || `${c.prenom} ${c.nom}`).trim()
+
+/**
+ * Numéros presque identiques dans une même fiche Google (ex. 06 41… / 06 61…).
+ * Les autres fiches Google (frères et sœurs) départagent : le numéro qu'on y
+ * retrouve est gardé, l'autre est signalé comme faute de frappe probable.
+ * Sans confirmation, les deux sont gardés et signalés « à vérifier ».
+ */
+function departagerNumeros(c, retenus, changements, actuels) {
+  const cles = [...new Set(c.telephones.map(t => cleTel(t.numero)))]
+  const confirme = (k) => retenus.filter(x => x.id !== c.id && x.telephones.some(t => cleTel(t.numero) === k)).map(nomContact)
+  const enAppli = new Set(actuels.map(t => cleTel(t.numero)))
+  const fmt = (k) => c.telephones.find(t => cleTel(t.numero) === k)?.numero || k
+  const signaler = (k, alerte, garder) => {
+    let ch = changements.find(x => x.cle.endsWith(`:${k}`))
+    if (!garder && enAppli.has(k)) {
+      // Présent dans l'appli : proposer de le retirer à la place de tout autre changement
+      const i = changements.indexOf(ch)
+      const qui = actuels.find(t => cleTel(t.numero) === k)?.libelle || ''
+      const retrait = { cle: `retirer:${k}`, type: 'retirer', numero: fmt(k), qui, actif: true, alerte }
+      if (i >= 0) changements[i] = retrait; else changements.push(retrait)
+      return
+    }
+    if (!ch) {
+      ch = { cle: `note:${k}`, type: 'note', numero: fmt(k), actif: false }
+      changements.push(ch)
+    }
+    if (!garder && ch.type === 'ajouter') ch.actif = false
+    ch.alerte = ch.alerte ? `${ch.alerte} · ${alerte}` : alerte
+  }
+  for (let i = 0; i < cles.length; i++) {
+    for (let j = i + 1; j < cles.length; j++) {
+      const a = cles[i], b = cles[j]
+      if (!presqueIdentiques(a, b)) continue
+      const ca = confirme(a), cb = confirme(b)
+      if (ca.length && !cb.length || cb.length && !ca.length) {
+        const [bon, faux, par] = ca.length ? [a, b, ca] : [b, a, cb]
+        signaler(faux, `⚠️ faute de frappe probable : ressemble à ${fmt(bon)}, confirmé par la fiche Google de ${par.join(', ')}`, false)
+        signaler(bon, `✔ confirmé par la fiche Google de ${par.join(', ')}`, true)
+      } else {
+        const alerte = `⚠️ à vérifier : ${fmt(a)} et ${fmt(b)} ne diffèrent que d'un chiffre (faute de frappe probable dans Google)`
+        signaler(a, alerte, true)
+        signaler(b, alerte, true)
+      }
+    }
+  }
+}
+
 /**
  * Rapproche membres et contacts des libellés choisis, puis liste les changements.
  * Rapprochement : nom + prénom (sans accents ni casse), sinon un numéro ou
@@ -180,6 +237,7 @@ export function comparer(eleves, contacts, libellesChoisis) {
     for (const [k, g] of google) {
       if (!connus.has(k)) changements.push({ cle: `ajouter:${k}`, type: 'ajouter', numero: g.numero, qui: g.qui, actif: true })
     }
+    departagerNumeros(c, retenus, changements, actuels)
 
     if (changements.length) {
       fiches.push({ eleve: e, contact: c, douteux, choisie: !douteux, changements })
@@ -208,7 +266,7 @@ export function appliquer(eleve, changements) {
     if (ch.type === 'email') sortie.email = ch.nouveau
     if (ch.type === 'qui') tels = tels.map(t => (cleTel(t.numero) === cleTel(ch.numero) ? { ...t, libelle: ch.nouveau } : t))
     if (ch.type === 'retirer') tels = tels.filter(t => cleTel(t.numero) !== cleTel(ch.numero))
-    if (ch.type === 'ajouter') tels.push({ numero: ch.numero, libelle: ch.qui || '', actifSMS: true })
+    if (ch.type === 'ajouter' && !tels.some(t => cleTel(t.numero) === cleTel(ch.numero))) tels.push({ numero: ch.numero, libelle: ch.qui || '', actifSMS: true })
   }
   sortie.telephones = tels
   delete sortie.telephone       // sinon _preparerEleve réécrit le premier numéro
