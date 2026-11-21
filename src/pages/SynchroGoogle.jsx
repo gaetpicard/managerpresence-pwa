@@ -2,14 +2,17 @@ import React, { useState, useEffect } from 'react'
 import { FirebaseService } from '../services/FirebaseService'
 import { nettoyerLibelle } from '../services/ImportCsv'
 import {
-  connecterGoogle, deconnecterGoogle, lireLibelles, lireContacts, comparer, appliquer
+  connecterGoogle, deconnecterGoogle, lireLibelles, lireContacts, comparer, appliquer,
+  trouverConflits, ecarterNumeros, reglesDepuisConflits
 } from '../services/GoogleContacts'
 
 /**
  * Fenêtre « Synchroniser avec Google Contacts » de la page Membres.
  * 1. connexion au compte Google de la structure ;
  * 2. choix des libellés à prendre en compte (mémorisés pour la structure) ;
- * 3. aperçu des changements, fiche par fiche, puis application.
+ * 3. conflits : un même numéro sous plusieurs noms (hors frères et sœurs) —
+ *    garder ou écarter le numéro pour chacun ; décisions mémorisées ;
+ * 4. aperçu des changements, fiche par fiche, puis application.
  * Google fait foi pour l'e-mail, les numéros et leur « Qui ? ».
  */
 function SynchroGoogle({ eleves, onFermer, onTermine, showToast }) {
@@ -20,6 +23,9 @@ function SynchroGoogle({ eleves, onFermer, onTermine, showToast }) {
   const [choisis, setChoisis] = useState([])
   const [contacts, setContacts] = useState([])
   const [resultat, setResultat] = useState(null)
+  const [regles, setRegles] = useState({})
+  const [conflits, setConflits] = useState([])
+  const [voirRegles, setVoirRegles] = useState(false)
   const [occupe, setOccupe] = useState('')
   const [progression, setProgression] = useState(0)
 
@@ -27,6 +33,7 @@ function SynchroGoogle({ eleves, onFermer, onTermine, showToast }) {
     FirebaseService.getGoogleContactsConfig().then(c => {
       setCompte(c.compte || '')
       setChoisis(c.libelles || [])
+      setRegles(c.conflits || {})
     })
   }, [])
 
@@ -66,7 +73,24 @@ function SynchroGoogle({ eleves, onFermer, onTermine, showToast }) {
     } catch (e) {
       console.error('Réglages Google non enregistrés :', e)
     }
-    setResultat(comparer(eleves, contacts, choisis))
+    const cf = trouverConflits(contacts, choisis, regles)
+    setConflits(cf)
+    setVoirRegles(false)
+    // Rien à régler : directement l'aperçu
+    if (cf.some(c => !c.dejaRegle)) setEtape('conflits')
+    else afficherApercu(cf)
+  }
+
+  const basculerPorteur = (cle, id) => setConflits(cs => cs.map(cf => (cf.cle !== cle ? cf : {
+    ...cf, porteurs: cf.porteurs.map(p => (p.id === id ? { ...p, garde: !p.garde } : p))
+  })))
+
+  const afficherApercu = async (cf) => {
+    const nouvelles = reglesDepuisConflits(cf, regles)
+    setRegles(nouvelles)
+    try { await FirebaseService.updateGoogleContactsConfig({ conflits: nouvelles }) }
+    catch (e) { console.error('Décisions de conflits non enregistrées :', e) }
+    setResultat(comparer(eleves, ecarterNumeros(contacts, cf), choisis))
     setEtape('apercu')
   }
 
@@ -180,6 +204,33 @@ function SynchroGoogle({ eleves, onFermer, onTermine, showToast }) {
             </>
           )}
 
+          {etape === 'conflits' && (
+            <>
+              <p>Ces numéros figurent sur plusieurs fiches Google sous des noms différents
+                (les frères et sœurs, même nom de famille, ne sont pas listés).
+                Décoche le numéro pour la personne à qui <strong>il n'appartient pas</strong>.
+                Ton choix est mémorisé pour les prochaines synchros.</p>
+              {conflits.filter(cf => !cf.dejaRegle || voirRegles).map(cf => (
+                <div key={cf.cle} style={{ ...carte, borderColor: cf.dejaRegle ? '#ddd' : '#e65100' }}>
+                  <div style={{ fontWeight: 600 }}>📞 {cf.numero} {cf.dejaRegle
+                    ? <span style={{ color: '#2e7d32', fontWeight: 400 }}>— déjà réglé</span>
+                    : <span style={{ color: '#e65100', fontWeight: 400 }}>— sur {cf.porteurs.length} fiches</span>}</div>
+                  {cf.porteurs.map(p => (
+                    <label key={p.id} style={{ display: 'flex', gap: 8, alignItems: 'center', marginLeft: 24, cursor: 'pointer' }}>
+                      <input type="checkbox" checked={p.garde} onChange={() => basculerPorteur(cf.cle, p.id)} />
+                      <span style={{ textDecoration: p.garde ? 'none' : 'line-through' }}>{p.nom}{p.qui ? ` (${p.qui})` : ''}</span>
+                    </label>
+                  ))}
+                </div>
+              ))}
+              {conflits.some(cf => cf.dejaRegle) && (
+                <button className="btn btn-secondary btn-sm" onClick={() => setVoirRegles(!voirRegles)}>
+                  {voirRegles ? 'Masquer' : 'Revoir'} les {conflits.filter(cf => cf.dejaRegle).length} conflit(s) déjà réglé(s)
+                </button>
+              )}
+            </>
+          )}
+
           {etape === 'apercu' && resultat && (
             <>
               <p><strong>{resultat.retenus}</strong> contact(s) Google dans les libellés choisis ·{' '}
@@ -239,9 +290,20 @@ function SynchroGoogle({ eleves, onFermer, onTermine, showToast }) {
           {etape === 'libelles' && (
             <button className="btn btn-primary" disabled={!choisis.length} onClick={comparerMaintenant}>Comparer</button>
           )}
+          {etape === 'conflits' && (
+            <>
+              <button className="btn btn-secondary" onClick={() => setEtape('libelles')}>Libellés</button>
+              <button className="btn btn-primary" onClick={() => afficherApercu(conflits)}>Continuer</button>
+            </>
+          )}
           {etape === 'apercu' && (
             <>
               <button className="btn btn-secondary" disabled={!!occupe} onClick={() => setEtape('libelles')}>Libellés</button>
+              {conflits.length > 0 && (
+                <button className="btn btn-secondary" disabled={!!occupe} onClick={() => { setVoirRegles(true); setEtape('conflits') }}>
+                  Conflits ({conflits.length})
+                </button>
+              )}
               <button className="btn btn-primary" disabled={!!occupe || !aFaire.length} onClick={valider}>
                 Valider ({aFaire.length})
               </button>

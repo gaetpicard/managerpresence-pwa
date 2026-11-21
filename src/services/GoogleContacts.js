@@ -124,6 +124,74 @@ export async function lireContacts(jeton) {
   return contacts
 }
 
+const nomContact = (c) => (c.affiche || `${c.prenom} ${c.nom}`).trim()
+
+// ── Conflits : un même numéro sous plusieurs noms ───────────────────────
+
+const motsNom = (c) => String(c.nom || c.affiche || '')
+  .normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+  .split(/[^a-z0-9]+/).filter(m => m.length >= 3)
+
+/** Même famille : au moins un mot du nom en commun (METAY DERRUAU / METAY). */
+export function memeFamille(a, b) {
+  const ma = motsNom(a)
+  return motsNom(b).some(m => ma.includes(m))
+}
+
+/**
+ * Numéros présents sur plusieurs contacts des libellés choisis.
+ * Frères et sœurs (même nom de famille) : normal, pas de conflit.
+ * Sinon : conflit à régler — pour chaque porteur, garder ou écarter le numéro.
+ * `regles` = décisions déjà prises { cleTel: [ids des contacts écartés] }.
+ */
+export function trouverConflits(contacts, libellesChoisis, regles = {}) {
+  const retenus = contacts.filter(c => c.libelles.some(l => libellesChoisis.includes(l)))
+  const parNumero = new Map()
+  for (const c of retenus) {
+    for (const t of c.telephones) {
+      const k = cleTel(t.numero)
+      if (!k) continue
+      if (!parNumero.has(k)) parNumero.set(k, [])
+      const liste = parNumero.get(k)
+      if (!liste.some(p => p.contact.id === c.id)) liste.push({ contact: c, qui: t.qui, numero: t.numero })
+    }
+  }
+  const conflits = []
+  for (const [k, porteurs] of parNumero) {
+    if (porteurs.length < 2) continue
+    const famille = porteurs.every((p, i) => porteurs.every((q, j) => i === j || memeFamille(p.contact, q.contact)))
+    if (famille) continue
+    const ecartes = regles[k]
+    conflits.push({
+      cle: k,
+      numero: porteurs[0].numero,
+      dejaRegle: Array.isArray(ecartes),
+      porteurs: porteurs.map(p => ({
+        id: p.contact.id, nom: nomContact(p.contact), qui: p.qui,
+        garde: !(ecartes || []).includes(p.contact.id)
+      }))
+    })
+  }
+  conflits.sort((a, b) => Number(a.dejaRegle) - Number(b.dejaRegle) || a.numero.localeCompare(b.numero))
+  return conflits
+}
+
+/** Retire des contacts les numéros écartés lors du règlement des conflits. */
+export function ecarterNumeros(contacts, conflits) {
+  const ecartes = new Map(conflits.map(cf => [cf.cle, cf.porteurs.filter(p => !p.garde).map(p => p.id)]))
+  return contacts.map(c => ({
+    ...c,
+    telephones: c.telephones.filter(t => !(ecartes.get(cleTel(t.numero)) || []).includes(c.id))
+  }))
+}
+
+/** Décisions à mémoriser : { cleTel: [ids écartés] } (liste vide = tout gardé, mais réglé). */
+export function reglesDepuisConflits(conflits, anciennes = {}) {
+  const regles = { ...anciennes }
+  for (const cf of conflits) regles[cf.cle] = cf.porteurs.filter(p => !p.garde).map(p => p.id)
+  return regles
+}
+
 // ── Comparaison ─────────────────────────────────────────────────────────
 
 /** Deux numéros qui ne diffèrent que d'un chiffre, ou de deux chiffres voisins inversés : faute de frappe probable. */
@@ -134,8 +202,6 @@ export function presqueIdentiques(a, b) {
   if (diff.length === 1) return true
   return diff.length === 2 && diff[1] === diff[0] + 1 && a[diff[0]] === b[diff[1]] && a[diff[1]] === b[diff[0]]
 }
-
-const nomContact = (c) => (c.affiche || `${c.prenom} ${c.nom}`).trim()
 
 /**
  * Numéros presque identiques dans une même fiche Google (ex. 06 41… / 06 61…).
