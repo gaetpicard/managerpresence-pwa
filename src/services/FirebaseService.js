@@ -791,14 +791,22 @@ export const FirebaseService = {
     const champs = {
       titre: sortie.titre, date: sortie.date, jour: sortie.jour,
       heureDebut: sortie.heureDebut, heureFin: sortie.heureFin, lieu: sortie.lieu,
-      jauge: sortie.jauge || 0, jaugeMax: sortie.jaugeMax || 0, eleves: sortie.eleves || [], nonViennent: sortie.nonViennent || [], cadres: sortie.cadres || [],
+      jauge: sortie.jauge || 0, jaugeMax: sortie.jaugeMax || 0, cadres: sortie.cadres || [],
       annulerSalle: !!sortie.annulerSalle
     }
     if (sortie.id) {
       await setDoc(doc(db, 'sorties', sortie.id), champs, { merge: true })
     } else {
-      await setDoc(doc(collection(db, 'sorties')), { ...champs, creePar: auteur, ts: Date.now(), valide: false })
+      // Participants : réglés à part (enregistrerParticipantsSortie), pour ne pas écraser les réponses d'un autre
+      await setDoc(doc(collection(db, 'sorties')), {
+        ...champs, eleves: sortie.eleves || [], nonViennent: sortie.nonViennent || [], creePar: auteur, ts: Date.now(), valide: false
+      })
     }
+  },
+
+  async enregistrerParticipantsSortie(id, eleves, nonViennent) {
+    if (!db) throw new Error('Firebase non initialisé')
+    await updateDoc(doc(db, 'sorties', id), { eleves, nonViennent })
   },
 
   async supprimerSortie(id) {

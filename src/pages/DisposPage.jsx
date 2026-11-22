@@ -82,10 +82,16 @@ function DisposPage() {
   // Jauges d'une date : réglage propre à la séance, sinon celui du créneau (0 = aucune)
   const jaugeMin = (s, crId) => (jourDe(s).jauges || {})[crId] ?? jauges[crId] ?? 0
   const jaugeMax = (s, crId) => (jourDe(s).jaugesMax || {})[crId] ?? jaugesMax[crId] ?? 0
-  const nbOuiDe = (s, crId) => Object.values((jourDe(s).votes || {})[crId] || {}).filter(x => x.v === 'OUI').length
-  // Maximum atteint : plus de Oui pour ce cadre (sauf s'il l'a déjà dit, ou si on est admin)
+  // Encadrants comptés : les « Oui » + les cadres déclarés présents (le jour même ou à l'appel), sans doublon
+  const encadrantsDe = (s, crId) => {
+    const votes = (jourDe(s).votes || {})[crId] || {}
+    const oui = Object.keys(votes).filter(n => votes[n].v === 'OUI')
+    return [...new Set([...oui, ...((jourDe(s).presents || {})[crId] || [])])]
+  }
+  const nbOuiDe = (s, crId) => encadrantsDe(s, crId).length
+  // Maximum atteint : plus de Oui pour ce cadre (sauf s'il est déjà compté, ou si on est admin)
   const ouiBloque = (s, crId) => !estAdmin && jaugeMax(s, crId) > 0 && nbOuiDe(s, crId) >= jaugeMax(s, crId) &&
-    ((jourDe(s).votes || {})[crId] || {})[pourQui]?.v !== 'OUI'
+    !encadrantsDe(s, crId).includes(pourQui)
 
   const voter = async (s, creneauId, v) => {
     if (!pourQui) { showToast('Choisir pour qui répondre', 'error'); return }
@@ -265,7 +271,7 @@ function DisposPage() {
               </div>
               {creneaux.filter(c => s.creneauxActifsIds.includes(c.id)).map(cr => {
                 const votes = (jour.votes || {})[cr.id] || {}
-                const oui = Object.values(votes).filter(x => x.v === 'OUI').length
+                const oui = nbOuiDe(s, cr.id)
                 const jauge = jaugeMin(s, cr.id)
                 const max = jaugeMax(s, cr.id)
                 const sous = jauge > 0 && oui < jauge

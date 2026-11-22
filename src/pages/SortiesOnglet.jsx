@@ -25,6 +25,7 @@ function SortiesOnglet({ sorties, recharger, cadres, creneaux, pourQui, auteur, 
   const [eleves, setEleves] = useState([])
   const [edition, setEdition] = useState(null)
   const [appel, setAppel] = useState(null)
+  const [participants, setParticipants] = useState(null)
   const [recherche, setRecherche] = useState('')
   const [seulementSansReponse, setSeulementSansReponse] = useState(false)
   const [referent, setReferent] = useState('')
@@ -43,11 +44,28 @@ function SortiesOnglet({ sorties, recharger, cadres, creneaux, pourQui, auteur, 
     const oui = existants(s.eleves).length, non = existants(s.nonViennent).length
     return `✅ ${oui} viennent · ❌ ${non} ne viennent pas · ❓ ${Math.max(0, eleves.length - oui - non)} sans réponse`
   }
-  const nbOui = s => Object.values(s.votes || {}).filter(x => x.v === 'OUI').length
+  // Encadrants comptés : ceux qui ont dit Oui + les prévus qui n'ont pas répondu autre chose
+  const encadrants = s => {
+    const votes = s.votes || {}
+    return [...new Set([...Object.keys(votes).filter(n => votes[n].v === 'OUI'), ...(s.cadres || []).filter(n => !votes[n])])]
+  }
+  const nbOui = s => encadrants(s).length
   const sousJauge = s => (s.jauge || 0) > 0 && nbOui(s) < s.jauge
   const plein = s => (s.jaugeMax || 0) > 0 && nbOui(s) >= s.jaugeMax
-  // Maximum atteint : plus de Oui pour ce cadre (sauf s'il l'a déjà dit, ou si on est admin)
-  const ouiBloque = s => !estAdmin && plein(s) && (s.votes || {})[pourQui]?.v !== 'OUI'
+  // Maximum atteint : plus de Oui pour ce cadre (sauf s'il est déjà compté, ou si on est admin)
+  const ouiBloque = s => !estAdmin && plein(s) && !encadrants(s).includes(pourQui)
+  // Élèves rangés par créneau, chacun une seule fois : dans celui de ses créneaux qui compte le plus
+  // d'élèves « propres » (inscrits dans ce seul créneau), à égalité le premier. Un créneau bonus
+  // (ex. G Perf, dont tous les élèves sont aussi dans un groupe de base) ne prend donc personne.
+  const groupesEleves = () => {
+    const ids = creneaux.map(cr => cr.id)
+    const siens = new Map(eleves.map(e => [e.id, [...new Set((e.creneauxIds || []).filter(id => ids.includes(id)))]]))
+    const propres = Object.fromEntries(ids.map(id => [id, [...siens.values()].filter(l => l.length === 1 && l[0] === id).length]))
+    const place = new Map([...siens].map(([eid, l]) => [eid, l.reduce((m, id) =>
+      m === null || propres[id] > propres[m] || (propres[id] === propres[m] && ids.indexOf(id) < ids.indexOf(m)) ? id : m, null)]))
+    return [...creneaux.map(cr => ({ cle: cr.id, nom: cr.nom, membres: eleves.filter(e => place.get(e.id) === cr.id) })),
+      { cle: '_aucun', nom: 'Sans créneau', membres: eleves.filter(e => place.get(e.id) === null) }]
+  }
   // Organisation et réglages : admin ou auteur de la sortie
   const modifiable = s => estAdmin || (!!s.creePar && s.creePar === auteur)
   const texteJauge = s => {
@@ -76,10 +94,23 @@ function SortiesOnglet({ sorties, recharger, cadres, creneaux, pourQui, auteur, 
     if (!/^\d{2}\/\d{2}$/.test(e.date) || !jour) { showToast('Date invalide (JJ/MM)', 'error'); return }
     if (!/^\d{2}:\d{2}$/.test(e.heureDebut) || !/^\d{2}:\d{2}$/.test(e.heureFin)) { showToast('Heures invalides (HH:MM)', 'error'); return }
     try {
-      await FirebaseService.enregistrerSortie({ ...e, titre: e.titre.trim(), lieu: e.lieu.trim(), jour, eleves: existants(e.eleves), nonViennent: existants(e.nonViennent) }, auteur)
+      await FirebaseService.enregistrerSortie({ ...e, titre: e.titre.trim(), lieu: e.lieu.trim(), jour }, auteur)
       setEdition(null)
       await recharger()
     } catch (err) { showToast('Sortie non enregistrée', 'error') }
+  }
+
+  const ouvrirParticipants = s => {
+    setRecherche(''); setSeulementSansReponse(false)
+    setParticipants({ id: s.id, titre: s.titre, eleves: existants(s.eleves), nonViennent: existants(s.nonViennent) })
+  }
+
+  const enregistrerParticipants = async () => {
+    try {
+      await FirebaseService.enregistrerParticipantsSortie(participants.id, existants(participants.eleves), existants(participants.nonViennent))
+      setParticipants(null)
+      await recharger()
+    } catch (e) { showToast('Participants non enregistrés', 'error') }
   }
 
   const supprimer = async s => {
@@ -125,7 +156,7 @@ function SortiesOnglet({ sorties, recharger, cadres, creneaux, pourQui, auteur, 
             <div>{titreJour(s)} · 🕘 {s.heureDebut}-{s.heureFin}{s.lieu ? ` · 📍 ${s.lieu}` : ''}</div>
             {s.annulerSalle && <div style={{ color: '#c62828', fontWeight: 600, fontSize: 13 }}>🚫 Séances en salle annulées ce jour</div>}
             <div style={{ fontSize: 13 }}>Encadrants prévus : {[...(s.cadres || [])].sort().join(', ') || '—'}</div>
-            <div style={{ fontSize: 13 }}>{resume(s)}</div>
+            <div style={{ fontSize: 13, cursor: modifiable(s) ? 'pointer' : undefined }} onClick={() => modifiable(s) && ouvrirParticipants(s)}>{resume(s)}</div>
             <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
               {CHOIX.map(c => <span key={c.v} style={c.v === 'OUI' && ouiBloque(s) ? { ...puce(false), background: '#eee', color: '#888', cursor: 'not-allowed' } : puce(monVote?.v === c.v, c.couleur)} onClick={() => voter(s, c.v)}>{c.label}</span>)}
             </div>
@@ -135,6 +166,7 @@ function SortiesOnglet({ sorties, recharger, cadres, creneaux, pourQui, auteur, 
                 return noms.length ? `${c.label} : ${noms.join(', ')}` : null
               }).filter(Boolean).join(' · ')}
             </div>
+            {modifiable(s) && <button className="btn btn-primary" style={{ width: '100%', marginTop: 8 }} onClick={() => ouvrirParticipants(s)}>👥 Participants</button>}
             <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
               <button className="btn btn-secondary btn-sm" onClick={() => ouvrirAppel(s)}>📋 Appel{s.valide ? ' ✓' : ''}</button>
               {modifiable(s) && <button className="btn btn-secondary btn-sm" onClick={() => { setRecherche(''); setEdition({ ...VIDE, ...s }) }}>✏ Modifier</button>}
@@ -205,18 +237,32 @@ function SortiesOnglet({ sorties, recharger, cadres, creneaux, pourQui, auteur, 
                   </label>
                 ))}
               </div>
-              <strong>Participants</strong>
-              <div style={{ fontSize: 13 }}>{resume(edition)}</div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setEdition(null)}>Annuler</button>
+              <button className="btn btn-primary" onClick={enregistrer}>Enregistrer</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {participants && (
+        <div className="modal-overlay" onClick={() => setParticipants(null)}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxHeight: '90vh', overflowY: 'auto' }}>
+            <div className="modal-header">
+              <h2 className="modal-title">👥 Participants — {participants.titre}</h2>
+              <button className="modal-close" onClick={() => setParticipants(null)}>×</button>
+            </div>
+            <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ fontSize: 13 }}>{resume(participants)}</div>
               <input className="form-input" placeholder="Rechercher un élève" value={recherche} onChange={e => setRecherche(e.target.value)} />
               <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
                 <input type="checkbox" checked={seulementSansReponse} onChange={() => setSeulementSansReponse(!seulementSansReponse)} />
                 ❓ Sans réponse seulement
               </label>
-              {[...creneaux.map(cr => ({ cle: cr.id, nom: cr.nom, membres: eleves.filter(e => (e.creneauxIds || []).includes(cr.id)) })),
-                { cle: '_aucun', nom: 'Sans créneau', membres: eleves.filter(e => !(e.creneauxIds || []).some(id => creneaux.some(cr => cr.id === id))) }
-              ].map(g => {
+              {groupesEleves().map(g => {
                 const f = recherche.trim().toLowerCase()
-                const viennent = edition.eleves || [], refus = edition.nonViennent || []
+                const viennent = participants.eleves || [], refus = participants.nonViennent || []
                 const liste = g.membres
                   .filter(e => !f || `${e.prenom} ${e.nom}`.toLowerCase().includes(f))
                   .filter(e => !seulementSansReponse || (!viennent.includes(e.id) && !refus.includes(e.id)))
@@ -227,7 +273,7 @@ function SortiesOnglet({ sorties, recharger, cadres, creneaux, pourQui, auteur, 
                   const deja = oui ? viennent.includes(id) : refus.includes(id)
                   const v = viennent.filter(x => x !== id), n = refus.filter(x => x !== id)
                   if (!deja) (oui ? v : n).push(id)
-                  setEdition({ ...edition, eleves: v, nonViennent: n })
+                  setParticipants({ ...participants, eleves: v, nonViennent: n })
                 }
                 return (
                   <div key={g.cle}>
@@ -247,8 +293,8 @@ function SortiesOnglet({ sorties, recharger, cadres, creneaux, pourQui, auteur, 
               })}
             </div>
             <div className="modal-footer">
-              <button className="btn btn-secondary" onClick={() => setEdition(null)}>Annuler</button>
-              <button className="btn btn-primary" onClick={enregistrer}>Enregistrer</button>
+              <button className="btn btn-secondary" onClick={() => setParticipants(null)}>Annuler</button>
+              <button className="btn btn-primary" onClick={enregistrerParticipants}>Enregistrer</button>
             </div>
           </div>
         </div>
