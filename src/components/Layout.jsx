@@ -1,6 +1,7 @@
 import React, { useRef, useLayoutEffect } from 'react'
 import { NavLink } from 'react-router-dom'
 import { useApp } from '../App'
+import { APPLI_GRATUITE } from '../services/Appli'
 
 /**
  * Position de defilement du menu, conservee HORS du composant.
@@ -76,11 +77,13 @@ function Layout({ children, title }) {
             <div className="sidebar-logo-icon">MP</div>
             <div className="sidebar-logo-text">
               <h1>{clubName || 'ManagerPresence'}</h1>
-              <p>
-                <span className={`badge ${getPlanBadgeClass()}`}>
-                  {getPlanEmoji()} {licence?.planNom || licence?.plan?.toUpperCase() || 'TRIAL'}
-                </span>
-              </p>
+              {!APPLI_GRATUITE && (
+                <p>
+                  <span className={`badge ${getPlanBadgeClass()}`}>
+                    {getPlanEmoji()} {licence?.planNom || licence?.plan?.toUpperCase() || 'TRIAL'}
+                  </span>
+                </p>
+              )}
             </div>
           </div>
         </div>
@@ -100,7 +103,7 @@ function Layout({ children, title }) {
         </nav>
 
         <div className="sidebar-footer">
-          {licence && (
+          {licence && !APPLI_GRATUITE && (
             <div className="licence-info">
               {licence.joursRestants > 0 ? (
                 <span>✅ {licence.joursRestants} jours restants</span>

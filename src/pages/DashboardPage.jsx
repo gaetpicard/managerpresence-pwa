@@ -3,6 +3,7 @@ import Layout from '../components/Layout'
 import { useApp } from '../App'
 import { ouvrirMessagerie, adresseSupport } from '../services/Messagerie'
 import { FirebaseService } from '../services/FirebaseService'
+import { APPLI_GRATUITE } from '../services/Appli'
 
 function DashboardPage() {
   const { licence, clubName, termes, projectId } = useApp()
@@ -200,8 +201,8 @@ function DashboardPage() {
         </div>
       </div>
 
-      {/* Infos licence */}
-      <div className="card">
+      {/* Infos licence (masquées tant que l'appli est gratuite) */}
+      {!APPLI_GRATUITE && <div className="card">
         <div className="card-header">
           <h3 className="card-title">📋 Informations de licence</h3>
         </div>
@@ -262,7 +263,7 @@ function DashboardPage() {
             </span>
           )}
         </div>
-      </div>
+      </div>}
 
       {/* Aide et informations */}
       <div className="card">
